@@ -1,7 +1,0 @@
-[submodule "thirdparty/oneDNN"]
-	path = thirdparty/oneDNN
-	url = https://github.com/oneapi-src/oneDNN.git
-	branch = main
-[submodule "thirdparty/work/oneDNN"]
-	path = thirdparty/work/oneDNN
-	url = https://github.com/oneapi-src/oneDNN.git
