@@ -32,7 +32,8 @@
 *.app
 
 # Directories
-bin/
-build/
-data/
-thirdparty/
+/bin
+/build
+/data
+/thirdparty
+

@@ -14,7 +14,7 @@ set(SOURCE_DIR ${PROJECT_ROOT}/src)
 set(THIRDPARTY_DIR ${PROJECT_ROOT}/thirdparty)
 
 # build thirdparties
-configure_file(${THIRDPARTY_DIR}/CMakeLists.txt.in ${THIRDPARTY_DIR}/CMakeLists.txt)
+configure_file(${PROJECT_ROOT}/CMakeLists_Thirdparty.txt.in ${THIRDPARTY_DIR}/CMakeLists.txt)
 
 execute_process(COMMAND ${CMAKE_COMMAND} -G "${CMAKE_GENERATOR}" .
         RESULT_VARIABLE result
