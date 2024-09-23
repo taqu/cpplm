@@ -12,7 +12,6 @@ set(SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR})
 set(HEADERS "catch_amalgamated.hpp")
 set(SOURCES
     ${SOURCE_DIR}/catch_amalgamated.cpp
-    ${SOURCE_DIR}/test_cnn.cpp
     ${SOURCE_DIR}/test_gguf.cpp
     ${SOURCE_DIR}/main.cpp)
 
@@ -36,12 +35,12 @@ if(MSVC)
     set(CMAKE_CXX_FLAGS "${DEFAULT_CXX_FLAGS}")
     set(CMAKE_CXX_FLAGS_DEBUG "/D_DEBUG /MDd /Zi /Ob0 /Od /RTC1 /Gy /GR- /GS /Gm- /EHsc")
     set(CMAKE_CXX_FLAGS_RELEASE "/MD /O2 /Oi /GL /GR- /DNDEBUG /EHsc-")
-    target_link_libraries(${PROJECT_NAME} ONEDNN OPENCL)
+    target_link_libraries(${PROJECT_NAME} MIMALLOC OPENCL)
 
 elseif(UNIX)
     set(DEFAULT_CXX_FLAGS "-Wall -O2 -std=c++20 -std=gnu++20 -march=x86-64-v3 -fno-exceptions -DVK_USE_PLATFORM_WIN32_KHR")
     set(CMAKE_CXX_FLAGS "${DEFAULT_CXX_FLAGS}")
-    target_link_libraries(${PROJECT_NAME} ONEDNN OPENCL)
+    target_link_libraries(${PROJECT_NAME} MIMALLOC OPENCL)
 elseif(APPLE)
 endif()
 
