@@ -3,6 +3,8 @@
 #include "gguf.h"
 #include <cassert>
 #include <cstdint>
+#include <initializer_list>
+#include <memory>
 
 namespace cppgpt
 {
@@ -124,6 +126,35 @@ enum class ggml_op
     GGML_OP_COUNT,
 };
 
+namespace util
+{
+    void copy1(u32 bits, u64 size, void* dst, const void* src);
+    void copy2(u32 bits, u64 size, void* dst, const void* src);
+    void copy3(u32 bits, u64 size, void* dst, const void* src);
+    void copy4(u32 bits, u64 size, void* dst, const void* src);
+    void copy5(u32 bits, u64 size, void* dst, const void* src);
+    void copy6(u32 bits, u64 size, void* dst, const void* src);
+    void copy8(u32 bits, u64 size, void* dst, const void* src);
+    void copy16(u32 bits, u64 size, void* dst, const void* src);
+    void copy32(u32 bits, u64 size, void* dst, const void* src);
+    void copy64(u32 bits, u64 size, void* dst, const void* src);
+
+    void copy1_f(u64 size, void* dst, const void* src);
+    void copy2_f(u64 size, void* dst, const void* src);
+    void copy3_f(u64 size, void* dst, const void* src);
+    void copy4_f(u64 size, void* dst, const void* src);
+    void copy5_f(u64 size, void* dst, const void* src);
+    void copy6_f(u64 size, void* dst, const void* src);
+    void copy8_f(u64 size, void* dst, const void* src);
+    void copyi8_f(u64 size, void* dst, const void* src);
+    void copyi16_f(u64 size, void* dst, const void* src);
+    void copyi32_f(u64 size, void* dst, const void* src);
+    void copyi64_f(u64 size, void* dst, const void* src);
+    void copyf16_f(u64 size, void* dst, const void* src);
+    void copyf32_f(u64 size, void* dst, const void* src);
+    void copyf64_f(u64 size, void* dst, const void* src);
+}
+
 //--- Memory
 //-----------------------------------------------------------
 class Memory
@@ -159,66 +190,110 @@ private:
     void* ptr_;
 };
 
-//--- MemoryView
-//-----------------------------------------------------------
-class MemoryView
-{
-public:
-    MemoryView();
-    explicit MemoryView(ggml_type type, u64 size, const void* ptr);
-    MemoryView(MemoryView&& other);
-    ~MemoryView();
-    MemoryView& operator=(MemoryView&& other);
-
-    u64 size() const;
-
-    u32 operator[](u64 i) const;
-
-private:
-    MemoryView(const MemoryView&) = delete;
-    MemoryView& operator=(const MemoryView&) = delete;
-    ggml_type type_;
-    u32 bits_;
-    u64 size_;
-    const void* ptr_;
-};
-
 //--- Tensor
 //-----------------------------------------------------------
 class Tensor
 {
 public:
     Tensor();
-    Tensor(ggml_type type, u64 dimensions);
+    Tensor(ggml_type type, std::initializer_list<u64> dimensions);
+    Tensor(ggml_type type, std::initializer_list<u64> dimensions, void* data);
+    Tensor(ggml_type type, const Tensor& shape);
+    Tensor(Tensor&& other);
     ~Tensor();
-    void zeros();
-    void ones();
+    Tensor& operator=(Tensor&& other);
+    ggml_type type() const;
+    u32 num_dims() const;
+    u64 total_size() const;
+    u64 total_bytes() const;
+    u64 size(u32 index) const;
 
+    template <typename T>
+    const T* data() const
+    { 
+        return reinterpret_cast<const T*>(data_.get()); 
+    }
+
+    template <typename T>
+    T* data()
+    { 
+        return reinterpret_cast<T*>(data_.get()); 
+    }
+
+    void resize(std::initializer_list<u64> dimensions) noexcept;
 private:
     Tensor(const Tensor&) = delete;
     Tensor& operator=(const Tensor&) = delete;
+    struct CustomDeleter
+    {
+        constexpr CustomDeleter(bool dummy) noexcept
+            :dummy_(dummy)
+        {
+        }
+
+        void operator()(u8* ptr) const
+        {
+            if(dummy_){
+                return;
+            }
+            delete[] ptr;
+        }
+        bool dummy_;
+    };
+
     ggml_type type_;
-    Memory data_;
+    u16 num_dims_;
+    u16 bit_packed_;
+    u64 dims_[GGML_MAX_DIMS];
+    std::unique_ptr<u8[], CustomDeleter> data_;
 };
 
-//--- Module
+namespace op
+{
+    Tensor&& convertF32(const Tensor& input);
+    f32 kahan_sum(u64 size, const f32* src);
+    f32 kahan_sum_squared(u64 size, const f32* src, f32 mean);
+    void normalize_vec(u64 size, f32* dst, const f32* src, const f32* weight, const f32* bias);
+    Tensor&& normalize(const Tensor& input, const Tensor& weight, const Tensor& bias);
+}
+
+//--- LayerNorm
 //-----------------------------------------------------------
-class Module
+class LayerNorm
 {
 public:
-    virtual ~Module()
-    {
-    }
-    virtual dnnl::memory forward(dnnl::memory tensor) = 0;
-
-protected:
-    Module()
-    {
-    }
+    LayerNorm();
+    LayerNorm(
+        ggml_type type,
+        u32 d_in,
+        u32 d_out,
+        void* weight,
+        void* bias);
+    ~LayerNorm();
+    Tensor&& forward(const Tensor& input);
 
 private:
-    Module(const Module&) = delete;
-    Module& operator=(const Module&) = delete;
+    Tensor weight_;
+    Tensor bias_;
+};
+
+//--- Embedding
+//-----------------------------------------------------------
+class Embedding
+{
+public:
+    Embedding();
+    Embedding(
+        ggml_type type,
+        u32 n_vocab,
+        u32 d_embed,
+        void* weight);
+    ~Embedding();
+    Tensor&& forward(const Tensor& input);
+    Tensor&& forward_proj(const Tensor& input);
+
+private:
+    Tensor weight_;
 };
 
 //--- RMSNorm
@@ -228,10 +303,8 @@ class RMSNorm: public Module
 public:
     RMSNorm(ggml_type type, u32 dimensions, f32 epsilon = 1.0e-6);
     virtual ~RMSNorm();
-    virtual dnnl::memory forward(dnnl::memory tensor) override;
 
 private:
-    dnnl::memory norm(dnnl::memory x);
     f32 epsilon_;
     Tensor weight_;
 };
@@ -284,8 +357,6 @@ private:
     Llama2(const Llama2&) = delete;
     Llama2& operator=(const Llama2&) = delete;
     Config config_;
-    std::vector<dnnl::primitive> network_;
-    std::vector<std::unordered_map<int32_t, dnnl::memory>> args_;
 };
 } // namespace cppgpt
 #endif // INC_CPPGPT_H_
