@@ -224,6 +224,8 @@ public:
 private:
     Tensor(const Tensor&) = delete;
     Tensor& operator=(const Tensor&) = delete;
+    friend bool is_same_shape(const Tensor&, const Tensor&);
+
     struct CustomDeleter
     {
         constexpr CustomDeleter(bool dummy) noexcept
@@ -256,6 +258,8 @@ namespace op
     void normalize_vec(u64 size, f32* dst, const f32* src, const f32* weight, const f32* bias);
     Tensor&& normalize(const Tensor& input, const Tensor& weight, const Tensor& bias);
 }
+
+bool is_same_shape(const Tensor& x0, const Tensor& x1);
 
 //--- LayerNorm
 //-----------------------------------------------------------
@@ -296,9 +300,73 @@ private:
     Tensor weight_;
 };
 
+//--- PositionalEmbedding
+//-----------------------------------------------------------
+class PositionalEmbedding
+{
+public:
+    PositionalEmbedding();
+    PositionalEmbedding(
+        ggml_type type,
+        u64 max_context,
+        u64 d_embed,
+        void* weight);
+    ~PositionalEmbedding();
+    Tensor&& forward(u64 num_context);
+
+private:
+    Tensor weight_;
+};
+
+//--- GELU
+//-----------------------------------------------------------
+class GELU
+{
+public:
+    GELU();
+    ~GELU();
+    Tensor&& forward(const Tensor& input);
+private:
+};
+
+//--- Residual
+//-----------------------------------------------------------
+class Residual
+{
+public:
+    Residual();
+    ~Residual();
+    Tensor&& forward(const Tensor& input0, const Tensor& input1);
+private:
+};
+
+//--- Linear
+//-----------------------------------------------------------
+class Linear
+{
+public:
+    Linear(int d_in, int d_out, int max_ctx);
+    Tensor forward(const Tensor& inp);
+    int64_t time() const noexcept { return exec_time_ms_; }
+    void reset_acv_cache() { acv_cached_=false; }
+
+public:
+    Tensor weight;
+    Tensor bias;
+
+private:
+    Tensor acv_;
+    bool transpose_out_{false};
+    bool acv_cached_{false};
+    int64_t exec_time_ms_{0};
+
+private:
+    Tensor forward_impl(const Tensor& inp);
+};
+
 //--- RMSNorm
 //-----------------------------------------------------------
-class RMSNorm: public Module
+class RMSNorm
 {
 public:
     RMSNorm(ggml_type type, u32 dimensions, f32 epsilon = 1.0e-6);

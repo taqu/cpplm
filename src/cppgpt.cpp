@@ -1,8 +1,8 @@
 #include "cppgpt.h"
 #include <cmath>
-#include <mimalloc-2.1/mimalloc.h>
-#include <immintrin.h>
 #include <functional>
+#include <immintrin.h>
+#include <mimalloc-2.1/mimalloc.h>
 
 namespace cppgpt
 {
@@ -202,74 +202,84 @@ namespace
             return 0;
         }
     }
-}
+} // namespace
 
 namespace util
 {
     void copy1(u32 bits, u64 size, void* dst, const void* src)
     {
-        assert(1==bits);
+        assert(1 == bits);
         (void)bits;
         u8* dstu8 = static_cast<u8*>(dst);
         const u8* srcu8 = static_cast<const u8*>(src);
-        for(u64 i=0; i<size; ++i){
-            u64 index = i>>3;
-            u64 bit = i-(index<<3);
-            u8 x = 0 == (srcu8[index] & bit)? 0 : 255;
+        for(u64 i = 0; i < size; ++i) {
+            u64 index = i >> 3;
+            u64 bit = i - (index << 3);
+            u8 x = 0 == (srcu8[index] & bit) ? 0 : 255;
             dstu8[i] = x;
         }
     }
 
     void copy2(u32 bits, u64 size, void* dst, const void* src)
     {
-        assert(2==bits);
+        assert(2 == bits);
         (void)bits;
         static const u8 values[4] = {
-            0, 85, 170, 255,
+            0,
+            85,
+            170,
+            255,
         };
         u8* dstu8 = static_cast<u8*>(dst);
         const u8* srcu8 = static_cast<const u8*>(src);
-        for(u64 i=0; i<size; ++i){
-            u64 index = i>>2;
-            u64 bit = (srcu8[index] >> ((i-(index<<2))<<1)) & 0x3UL;
-            assert(bit<4);
+        for(u64 i = 0; i < size; ++i) {
+            u64 index = i >> 2;
+            u64 bit = (srcu8[index] >> ((i - (index << 2)) << 1)) & 0x3UL;
+            assert(bit < 4);
             dstu8[i] = values[bit];
         }
     }
 
     void copy3(u32 bits, u64 size, void* dst, const void* src)
     {
-        assert(3==bits);
+        assert(3 == bits);
         (void)bits;
         static const u8 values[8] = {
-            0, 37, 73, 110, 146, 183, 219, 255,
+            0,
+            37,
+            73,
+            110,
+            146,
+            183,
+            219,
+            255,
         };
         u8* dstu8 = static_cast<u8*>(dst);
         const u8* srcu8 = static_cast<const u8*>(src);
-        for(u64 i=0; i<size; ++i){
-            u64 bit_index = i*3;
-            u64 index = bit_index>>3;
-            u64 remain = bit_index-(index<<3);
+        for(u64 i = 0; i < size; ++i) {
+            u64 bit_index = i * 3;
+            u64 index = bit_index >> 3;
+            u64 remain = bit_index - (index << 3);
             u64 bit = (srcu8[index] >> remain) & 0x7UL;
-            assert(remain<8);
-            if(6<=remain){
-                switch(8 - remain){
+            assert(remain < 8);
+            if(6 <= remain) {
+                switch(8 - remain) {
                 case 1:
-                    bit = bit | ((srcu8[index+1]&0x1UL)<<2UL);
+                    bit = bit | ((srcu8[index + 1] & 0x1UL) << 2UL);
                     break;
                 case 2:
-                    bit = bit | ((srcu8[index+1]&0x3UL)<<1UL);
+                    bit = bit | ((srcu8[index + 1] & 0x3UL) << 1UL);
                     break;
                 }
             }
-            assert(bit<8);
+            assert(bit < 8);
             dstu8[i] = values[bit];
         }
     }
 
     void copy4(u32 bits, u64 size, void* dst, const void* src)
     {
-        assert(4==bits);
+        assert(4 == bits);
         (void)bits;
         // clang-format off
         static const u8 values[16] = {
@@ -279,33 +289,33 @@ namespace util
         // clang-format on
         u8* dstu8 = static_cast<u8*>(dst);
         const u8* srcu8 = static_cast<const u8*>(src);
-        for(u64 i=0; i<size; ++i){
-            u64 bit_index = i<<2;
-            u64 index = bit_index>>3;
-            u64 remain = bit_index-(index<<3);
+        for(u64 i = 0; i < size; ++i) {
+            u64 bit_index = i << 2;
+            u64 index = bit_index >> 3;
+            u64 remain = bit_index - (index << 3);
             u64 bit = (srcu8[index] >> remain) & 0x15UL;
-            assert(remain<8);
-            if(5<=remain){
-                switch(8 - remain){
+            assert(remain < 8);
+            if(5 <= remain) {
+                switch(8 - remain) {
                 case 1:
-                    bit = bit | ((srcu8[index+1]&0x1UL)<<3UL);
+                    bit = bit | ((srcu8[index + 1] & 0x1UL) << 3UL);
                     break;
                 case 2:
-                    bit = bit | ((srcu8[index+1]&0x3UL)<<2UL);
+                    bit = bit | ((srcu8[index + 1] & 0x3UL) << 2UL);
                     break;
                 case 3:
-                    bit = bit | ((srcu8[index+1]&0x7UL)<<1UL);
+                    bit = bit | ((srcu8[index + 1] & 0x7UL) << 1UL);
                     break;
                 }
             }
-            assert(bit<16);
+            assert(bit < 16);
             dstu8[i] = values[bit];
         }
     }
 
     void copy5(u32 bits, u64 size, void* dst, const void* src)
     {
-        assert(5==bits);
+        assert(5 == bits);
         (void)bits;
         // clang-format off
         static const u8 values[32] = {
@@ -317,36 +327,36 @@ namespace util
         // clang-format on
         u8* dstu8 = static_cast<u8*>(dst);
         const u8* srcu8 = static_cast<const u8*>(src);
-        for(u64 i=0; i<size; ++i){
-            u64 bit_index = (i<<2) + i;
-            u64 index = bit_index>>3;
-            u64 remain = bit_index-(index<<3);
+        for(u64 i = 0; i < size; ++i) {
+            u64 bit_index = (i << 2) + i;
+            u64 index = bit_index >> 3;
+            u64 remain = bit_index - (index << 3);
             u64 bit = (srcu8[index] >> remain) & 0x31UL;
-            assert(remain<8);
-            if(4<=remain){
-                switch(8 - remain){
+            assert(remain < 8);
+            if(4 <= remain) {
+                switch(8 - remain) {
                 case 1:
-                    bit = bit | ((srcu8[index+1]&0x1UL)<<4UL);
+                    bit = bit | ((srcu8[index + 1] & 0x1UL) << 4UL);
                     break;
                 case 2:
-                    bit = bit | ((srcu8[index+1]&0x3UL)<<3UL);
+                    bit = bit | ((srcu8[index + 1] & 0x3UL) << 3UL);
                     break;
                 case 3:
-                    bit = bit | ((srcu8[index+1]&0x7UL)<<2UL);
+                    bit = bit | ((srcu8[index + 1] & 0x7UL) << 2UL);
                     break;
                 case 4:
-                    bit = bit | ((srcu8[index+1]&0xFUL)<<1UL);
+                    bit = bit | ((srcu8[index + 1] & 0xFUL) << 1UL);
                     break;
                 }
             }
-            assert(bit<32);
+            assert(bit < 32);
             dstu8[i] = values[bit];
         }
     }
 
     void copy6(u32 bits, u64 size, void* dst, const void* src)
     {
-        assert(6==bits);
+        assert(6 == bits);
         (void)bits;
         // clang-format off
         static const u8 values[64] = {
@@ -362,72 +372,72 @@ namespace util
         // clang-format on
         u8* dstu8 = static_cast<u8*>(dst);
         const u8* srcu8 = static_cast<const u8*>(src);
-        for(u64 i=0; i<size; ++i){
-            u64 bit_index = i*6;
-            u64 index = bit_index>>3;
-            u64 remain = bit_index-(index<<3);
+        for(u64 i = 0; i < size; ++i) {
+            u64 bit_index = i * 6;
+            u64 index = bit_index >> 3;
+            u64 remain = bit_index - (index << 3);
             u64 bit = (srcu8[index] >> remain) & 0x63UL;
-            assert(remain<8);
-            if(3<=remain){
-                switch(8 - remain){
+            assert(remain < 8);
+            if(3 <= remain) {
+                switch(8 - remain) {
                 case 1:
-                    bit = bit | ((srcu8[index+1]&0x1UL)<<5UL);
+                    bit = bit | ((srcu8[index + 1] & 0x1UL) << 5UL);
                     break;
                 case 2:
-                    bit = bit | ((srcu8[index+1]&0x3UL)<<4UL);
+                    bit = bit | ((srcu8[index + 1] & 0x3UL) << 4UL);
                     break;
                 case 3:
-                    bit = bit | ((srcu8[index+1]&0x7UL)<<3UL);
+                    bit = bit | ((srcu8[index + 1] & 0x7UL) << 3UL);
                     break;
                 case 4:
-                    bit = bit | ((srcu8[index+1]&0xFUL)<<2UL);
+                    bit = bit | ((srcu8[index + 1] & 0xFUL) << 2UL);
                     break;
                 case 5:
-                    bit = bit | ((srcu8[index+1]&0x1FUL)<<1UL);
+                    bit = bit | ((srcu8[index + 1] & 0x1FUL) << 1UL);
                     break;
                 }
             }
-            assert(bit<64);
+            assert(bit < 64);
             dstu8[i] = values[bit];
         }
     }
 
     void copy8(u32 bits, u64 size, void* dst, const void* src)
     {
-        assert(8==bits);
+        assert(8 == bits);
         (void)bits;
-        ::memcpy(dst, src, size*sizeof(u8));
+        ::memcpy(dst, src, size * sizeof(u8));
     }
 
     void copy16(u32 bits, u64 size, void* dst, const void* src)
     {
-        assert(16==bits);
+        assert(16 == bits);
         (void)bits;
-        ::memcpy(dst, src, size*sizeof(u16));
+        ::memcpy(dst, src, size * sizeof(u16));
     }
 
     void copy32(u32 bits, u64 size, void* dst, const void* src)
     {
-        assert(32==bits);
+        assert(32 == bits);
         (void)bits;
-        ::memcpy(dst, src, size*sizeof(u32));
+        ::memcpy(dst, src, size * sizeof(u32));
     }
 
     void copy64(u32 bits, u64 size, void* dst, const void* src)
     {
-        assert(64==bits);
+        assert(64 == bits);
         (void)bits;
-        ::memcpy(dst, src, size*sizeof(u64));
+        ::memcpy(dst, src, size * sizeof(u64));
     }
 
     void copy1_f(u64 size, void* dst, const void* src)
     {
         f32* dstf = static_cast<f32*>(dst);
         const u8* srcu8 = static_cast<const u8*>(src);
-        for(u64 i=0; i<size; ++i){
-            u64 index = i>>3;
-            u64 bit = i-(index<<3);
-            f32 x = 0 == (srcu8[index] & bit)? 0.0f : 1.0f;
+        for(u64 i = 0; i < size; ++i) {
+            u64 index = i >> 3;
+            u64 bit = i - (index << 3);
+            f32 x = 0 == (srcu8[index] & bit) ? 0.0f : 1.0f;
             dstf[i] = x;
         }
     }
@@ -435,14 +445,17 @@ namespace util
     void copy2_f(u64 size, void* dst, const void* src)
     {
         static const f32 values[4] = {
-            0.0f, 0.333333f, 0.666667f, 1.0f,
+            0.0f,
+            0.333333f,
+            0.666667f,
+            1.0f,
         };
         f32* dstf = static_cast<f32*>(dst);
         const u8* srcu8 = static_cast<const u8*>(src);
-        for(u64 i=0; i<size; ++i){
-            u64 index = i>>2;
-            u64 bit = (srcu8[index] >> ((i-(index<<2))<<1)) & 0x3UL;
-            assert(bit<4);
+        for(u64 i = 0; i < size; ++i) {
+            u64 index = i >> 2;
+            u64 bit = (srcu8[index] >> ((i - (index << 2)) << 1)) & 0x3UL;
+            assert(bit < 4);
             dstf[i] = values[bit];
         }
     }
@@ -450,27 +463,34 @@ namespace util
     void copy3_f(u64 size, void* dst, const void* src)
     {
         static const f32 values[8] = {
-            0.0f, 0.142857f, 0.285714f, 0.428571f, 0.571429f, 0.714286f, 0.857143f, 1.0f,
+            0.0f,
+            0.142857f,
+            0.285714f,
+            0.428571f,
+            0.571429f,
+            0.714286f,
+            0.857143f,
+            1.0f,
         };
         f32* dstf = static_cast<f32*>(dst);
         const u8* srcu8 = static_cast<const u8*>(src);
-        for(u64 i=0; i<size; ++i){
-            u64 bit_index = i*3;
-            u64 index = bit_index>>3;
-            u64 remain = bit_index-(index<<3);
+        for(u64 i = 0; i < size; ++i) {
+            u64 bit_index = i * 3;
+            u64 index = bit_index >> 3;
+            u64 remain = bit_index - (index << 3);
             u64 bit = (srcu8[index] >> remain) & 0x7UL;
-            assert(remain<8);
-            if(6<=remain){
-                switch(8 - remain){
+            assert(remain < 8);
+            if(6 <= remain) {
+                switch(8 - remain) {
                 case 1:
-                    bit = bit | ((srcu8[index+1]&0x1UL)<<2UL);
+                    bit = bit | ((srcu8[index + 1] & 0x1UL) << 2UL);
                     break;
                 case 2:
-                    bit = bit | ((srcu8[index+1]&0x3UL)<<1UL);
+                    bit = bit | ((srcu8[index + 1] & 0x3UL) << 1UL);
                     break;
                 }
             }
-            assert(bit<8);
+            assert(bit < 8);
             dstf[i] = values[bit];
         }
     }
@@ -485,26 +505,26 @@ namespace util
         // clang-format on
         f32* dstf = static_cast<f32*>(dst);
         const u8* srcu8 = static_cast<const u8*>(src);
-        for(u64 i=0; i<size; ++i){
-            u64 bit_index = i<<2;
-            u64 index = bit_index>>3;
-            u64 remain = bit_index-(index<<3);
+        for(u64 i = 0; i < size; ++i) {
+            u64 bit_index = i << 2;
+            u64 index = bit_index >> 3;
+            u64 remain = bit_index - (index << 3);
             u64 bit = (srcu8[index] >> remain) & 0x15UL;
-            assert(remain<8);
-            if(5<=remain){
-                switch(8 - remain){
+            assert(remain < 8);
+            if(5 <= remain) {
+                switch(8 - remain) {
                 case 1:
-                    bit = bit | ((srcu8[index+1]&0x1UL)<<3UL);
+                    bit = bit | ((srcu8[index + 1] & 0x1UL) << 3UL);
                     break;
                 case 2:
-                    bit = bit | ((srcu8[index+1]&0x3UL)<<2UL);
+                    bit = bit | ((srcu8[index + 1] & 0x3UL) << 2UL);
                     break;
                 case 3:
-                    bit = bit | ((srcu8[index+1]&0x7UL)<<1UL);
+                    bit = bit | ((srcu8[index + 1] & 0x7UL) << 1UL);
                     break;
                 }
             }
-            assert(bit<16);
+            assert(bit < 16);
             dstf[i] = values[bit];
         }
     }
@@ -521,29 +541,29 @@ namespace util
         // clang-format on
         f32* dstf = static_cast<f32*>(dst);
         const u8* srcu8 = static_cast<const u8*>(src);
-        for(u64 i=0; i<size; ++i){
-            u64 bit_index = (i<<2) + i;
-            u64 index = bit_index>>3;
-            u64 remain = bit_index-(index<<3);
+        for(u64 i = 0; i < size; ++i) {
+            u64 bit_index = (i << 2) + i;
+            u64 index = bit_index >> 3;
+            u64 remain = bit_index - (index << 3);
             u64 bit = (srcu8[index] >> remain) & 0x31UL;
-            assert(remain<8);
-            if(4<=remain){
-                switch(8 - remain){
+            assert(remain < 8);
+            if(4 <= remain) {
+                switch(8 - remain) {
                 case 1:
-                    bit = bit | ((srcu8[index+1]&0x1UL)<<4UL);
+                    bit = bit | ((srcu8[index + 1] & 0x1UL) << 4UL);
                     break;
                 case 2:
-                    bit = bit | ((srcu8[index+1]&0x3UL)<<3UL);
+                    bit = bit | ((srcu8[index + 1] & 0x3UL) << 3UL);
                     break;
                 case 3:
-                    bit = bit | ((srcu8[index+1]&0x7UL)<<2UL);
+                    bit = bit | ((srcu8[index + 1] & 0x7UL) << 2UL);
                     break;
                 case 4:
-                    bit = bit | ((srcu8[index+1]&0xFUL)<<1UL);
+                    bit = bit | ((srcu8[index + 1] & 0xFUL) << 1UL);
                     break;
                 }
             }
-            assert(bit<32);
+            assert(bit < 32);
             dstf[i] = values[bit];
         }
     }
@@ -564,32 +584,32 @@ namespace util
         // clang-format on
         f32* dstf = static_cast<f32*>(dst);
         const u8* srcu8 = static_cast<const u8*>(src);
-        for(u64 i=0; i<size; ++i){
-            u64 bit_index = i*6;
-            u64 index = bit_index>>3;
-            u64 remain = bit_index-(index<<3);
+        for(u64 i = 0; i < size; ++i) {
+            u64 bit_index = i * 6;
+            u64 index = bit_index >> 3;
+            u64 remain = bit_index - (index << 3);
             u64 bit = (srcu8[index] >> remain) & 0x63UL;
-            assert(remain<8);
-            if(3<=remain){
-                switch(8 - remain){
+            assert(remain < 8);
+            if(3 <= remain) {
+                switch(8 - remain) {
                 case 1:
-                    bit = bit | ((srcu8[index+1]&0x1UL)<<5UL);
+                    bit = bit | ((srcu8[index + 1] & 0x1UL) << 5UL);
                     break;
                 case 2:
-                    bit = bit | ((srcu8[index+1]&0x3UL)<<4UL);
+                    bit = bit | ((srcu8[index + 1] & 0x3UL) << 4UL);
                     break;
                 case 3:
-                    bit = bit | ((srcu8[index+1]&0x7UL)<<3UL);
+                    bit = bit | ((srcu8[index + 1] & 0x7UL) << 3UL);
                     break;
                 case 4:
-                    bit = bit | ((srcu8[index+1]&0xFUL)<<2UL);
+                    bit = bit | ((srcu8[index + 1] & 0xFUL) << 2UL);
                     break;
                 case 5:
-                    bit = bit | ((srcu8[index+1]&0x1FUL)<<1UL);
+                    bit = bit | ((srcu8[index + 1] & 0x1FUL) << 1UL);
                     break;
                 }
             }
-            assert(bit<64);
+            assert(bit < 64);
             dstf[i] = values[bit];
         }
     }
@@ -598,8 +618,8 @@ namespace util
     {
         f32* dstf = static_cast<f32*>(dst);
         const u8* srcu8 = static_cast<const u8*>(src);
-        for(u64 i=0; i<size; ++i){
-            dstf[i] = srcu8[i]/255.0f;
+        for(u64 i = 0; i < size; ++i) {
+            dstf[i] = srcu8[i] / 255.0f;
         }
     }
 
@@ -607,8 +627,8 @@ namespace util
     {
         f32* dstf = static_cast<f32*>(dst);
         const s8* srcs8 = static_cast<const s8*>(src);
-        for(u64 i=0; i<size; ++i){
-            dstf[i] = (0<=srcs8[i])? srcs8[i]/127.0f : srcs8[i]/128.0f;
+        for(u64 i = 0; i < size; ++i) {
+            dstf[i] = (0 <= srcs8[i]) ? srcs8[i] / 127.0f : srcs8[i] / 128.0f;
         }
     }
 
@@ -616,8 +636,8 @@ namespace util
     {
         f32* dstf = static_cast<f32*>(dst);
         const s16* srcs16 = static_cast<const s16*>(src);
-        for(u64 i=0; i<size; ++i){
-            dstf[i] = (0<=srcs16[i])? srcs16[i]/32767.0f : srcs16[i]/32768.0f;
+        for(u64 i = 0; i < size; ++i) {
+            dstf[i] = (0 <= srcs16[i]) ? srcs16[i] / 32767.0f : srcs16[i] / 32768.0f;
         }
     }
 
@@ -625,8 +645,8 @@ namespace util
     {
         f32* dstf = static_cast<f32*>(dst);
         const s32* srcs32 = static_cast<const s32*>(src);
-        for(u64 i=0; i<size; ++i){
-            f64 x = (0<=srcs32[i])? srcs32[i]/2'147'483'647.0 : srcs32[i]/2'147'483'648.0;
+        for(u64 i = 0; i < size; ++i) {
+            f64 x = (0 <= srcs32[i]) ? srcs32[i] / 2'147'483'647.0 : srcs32[i] / 2'147'483'648.0;
             dstf[i] = static_cast<f32>(x);
         }
     }
@@ -635,8 +655,8 @@ namespace util
     {
         f32* dstf = static_cast<f32*>(dst);
         const s64* srcs64 = static_cast<const s64*>(src);
-        for(u64 i=0; i<size; ++i){
-            f64 x = (0<=srcs64[i])? srcs64[i]/9'223'372'036'854'775'807.0 : srcs64[i]/9'223'372'036'854'775'808.0;
+        for(u64 i = 0; i < size; ++i) {
+            f64 x = (0 <= srcs64[i]) ? srcs64[i] / 9'223'372'036'854'775'807.0 : srcs64[i] / 9'223'372'036'854'775'808.0;
             dstf[i] = static_cast<f32>(x);
         }
     }
@@ -645,10 +665,10 @@ namespace util
     {
         f32* dstf = static_cast<f32*>(dst);
         const s16* srcs16 = static_cast<const s16*>(src);
-        u64 qsize = (size>>2)<<2;
-        u64 remain = size-qsize;
+        u64 qsize = (size >> 2) << 2;
+        u64 remain = size - qsize;
         __declspec(align(16)) f32 result[4];
-        for(u64 i=0; i<qsize; i+=4){
+        for(u64 i = 0; i < qsize; i += 4) {
             __m128i x = _mm_loadl_epi64((__m128i*)&srcs16[i]);
             __m128 f = _mm_cvtph_ps(x);
             _mm_store_ps(result, f);
@@ -657,7 +677,7 @@ namespace util
             dstf[i + 2] = result[2];
             dstf[i + 3] = result[3];
         }
-        for(u64 i=qsize; i<size; ++i){
+        for(u64 i = qsize; i < size; ++i) {
             __m128i x = _mm_set1_epi16(srcs16[i]);
             __m128 f = _mm_cvtph_ps(x);
             _mm_store_ps(result, f);
@@ -667,18 +687,18 @@ namespace util
 
     void copyf32_f(u64 size, void* dst, const void* src)
     {
-        ::memcpy(dst, src, sizeof(f32)*size);
+        ::memcpy(dst, src, sizeof(f32) * size);
     }
 
     void copyf64_f(u64 size, void* dst, const void* src)
     {
         f32* dstf = static_cast<f32*>(dst);
         const double* src64 = static_cast<const double*>(src);
-        for(u64 i=0; i<size; ++i){
+        for(u64 i = 0; i < size; ++i) {
             dstf[i] = static_cast<f32>(src64[i]);
         }
     }
-}
+} // namespace util
 
 void* allocate(size_t size, size_t align)
 {
@@ -694,22 +714,22 @@ void deallocate(void* ptr, size_t align)
 //-----------------------------------------------------------
 
 Memory::Memory()
-    :size_(0)
-    ,ptr_(nullptr)
+    : size_(0)
+    , ptr_(nullptr)
 {
 }
 
 Memory::Memory(Memory&& other)
-    :size_(other.size_)
-    ,ptr_(other.ptr_)
+    : size_(other.size_)
+    , ptr_(other.ptr_)
 {
     other.size_ = 0;
     other.ptr_ = nullptr;
 }
 
 Memory::Memory(u64 size)
-    :size_(size)
-    ,ptr_(nullptr)
+    : size_(size)
+    , ptr_(nullptr)
 {
 }
 
@@ -721,7 +741,7 @@ Memory::~Memory()
 
 Memory& Memory::operator=(Memory&& other)
 {
-    if(this != &other){
+    if(this != &other) {
         deallocate(ptr_);
         size_ = other.size_;
         ptr_ = other.ptr_;
@@ -742,7 +762,7 @@ namespace
         assert(nullptr != src);
         dnnl::engine eng = mem.get_engine();
         size_t size = mem.get_desc().get_size();
-#ifdef DNNL_WITH_SYCL
+#    ifdef DNNL_WITH_SYCL
         bool is_cpu_sycl = (DNNL_CPU_RUNTIME == DNNL_RUNTIME_SYCL
                             && eng.get_kind() == dnnl::engine::kind::cpu);
         bool is_gpu_sycl = (DNNL_GPU_RUNTIME == DNNL_RUNTIME_SYCL
@@ -772,8 +792,8 @@ namespace
             }
             return;
         }
-#endif
-#if DNNL_GPU_RUNTIME == DNNL_RUNTIME_OCL
+#    endif
+#    if DNNL_GPU_RUNTIME == DNNL_RUNTIME_OCL
         if(eng.get_kind() == dnnl::engine::kind::gpu) {
             void* mapped_ptr = mem.map_data();
             if(nullptr != mapped_ptr) {
@@ -782,7 +802,7 @@ namespace
             mem.unmap_data(mapped_ptr);
             return;
         }
-#endif
+#    endif
 
         if(eng.get_kind() == dnnl::engine::kind::cpu) {
             uint8_t* dst = static_cast<uint8_t*>(mem.get_data_handle());
@@ -798,7 +818,7 @@ namespace
         assert(mem);
         dnnl::engine eng = mem.get_engine();
         size_t size = mem.get_desc().get_size();
-#ifdef DNNL_WITH_SYCL
+#    ifdef DNNL_WITH_SYCL
         bool is_cpu_sycl = (DNNL_CPU_RUNTIME == DNNL_RUNTIME_SYCL
                             && eng.get_kind() == dnnl::engine::kind::cpu);
         bool is_gpu_sycl = (DNNL_GPU_RUNTIME == DNNL_RUNTIME_SYCL
@@ -828,8 +848,8 @@ namespace
             }
             return;
         }
-#endif
-#if DNNL_GPU_RUNTIME == DNNL_RUNTIME_OCL
+#    endif
+#    if DNNL_GPU_RUNTIME == DNNL_RUNTIME_OCL
         if(eng.get_kind() == dnnl::engine::kind::gpu) {
             void* mapped_ptr = mem.map_data();
             if(nullptr != mapped_ptr) {
@@ -838,7 +858,7 @@ namespace
             mem.unmap_data(mapped_ptr);
             return;
         }
-#endif
+#    endif
 
         if(eng.get_kind() == dnnl::engine::kind::cpu) {
             uint8_t* dst = static_cast<uint8_t*>(mem.get_data_handle());
@@ -897,7 +917,7 @@ Tensor::Tensor(ggml_type type, const Tensor& shape)
     type_ = type;
     bit_packed_ = 0;
     u64 total_size = 1;
-    for(u32 i=0; i<num_dims_; ++i){
+    for(u32 i = 0; i < num_dims_; ++i) {
         dims_[i] = shape.dims_[i];
         total_size *= shape.dims_[i];
     }
@@ -923,11 +943,11 @@ Tensor::~Tensor()
 
 Tensor& Tensor::operator=(Tensor&& other)
 {
-    if(this != &other){
+    if(this != &other) {
         type_ = other.type_;
         num_dims_ = other.num_dims_;
         bit_packed_ = other.bit_packed_;
-        ::memcpy(dims_, other.dims_, sizeof(u64)*GGML_MAX_DIMS);
+        ::memcpy(dims_, other.dims_, sizeof(u64) * GGML_MAX_DIMS);
         data_ = std::move(other.data_);
         other.num_dims_ = 0;
     }
@@ -967,22 +987,35 @@ u64 Tensor::total_bytes() const
 
 u64 Tensor::size(u32 index) const
 {
-    assert(index<num_dims_);
+    assert(index < num_dims_);
     return dims_[index];
 }
 
 void Tensor::resize(std::initializer_list<u64> dimensions) noexcept
 {
-    assert(1<=dimensions.size() && dimensions.size()<=GGML_MAX_DIMS);
-    u32 i=0;
+    assert(1 <= dimensions.size() && dimensions.size() <= GGML_MAX_DIMS);
+    u32 i = 0;
     u64 total = 1;
-    for(const u64& x : dimensions){
+    for(const u64& x: dimensions) {
         total *= x;
         dims_[i] = x;
         ++i;
     }
-    assert(total==total_size());
+    assert(total == total_size());
     num_dims_ = static_cast<u16>(dimensions.size());
+}
+
+bool is_same_shape(const Tensor& x0, const Tensor& x1)
+{
+    if(x0.num_dims() != x1.num_dims()) {
+        return false;
+    }
+    for(u32 i = 0; i < x0.num_dims(); ++i) {
+        if(x0.size(i) != x1.size(i)) {
+            return false;
+        }
+    }
+    return true;
 }
 
 namespace op
@@ -991,7 +1024,7 @@ namespace op
     {
         Tensor result(ggml_type::GGML_TYPE_F32, input);
         u64 size = input.total_size();
-        switch(input.type()){
+        switch(input.type()) {
         case ggml_type::GGML_TYPE_F32:
             util::copyf32_f(size, result.data<void>(), input.data<void>());
             break;
@@ -1083,12 +1116,11 @@ namespace op
         return std::move(result);
     }
 
-
     f32 dot_product(u64 size, const f32* x0, const f32* x1)
     {
         __m128 sum = _mm_setzero_ps();
-        u64 qsize = (size>>2)<<2;
-        for(u64 i=0; i<qsize; i+=4){
+        u64 qsize = (size >> 2) << 2;
+        for(u64 i = 0; i < qsize; i += 4) {
             __m128 v0 = _mm_loadu_ps(&x0[i]);
             __m128 v1 = _mm_loadu_ps(&x1[i]);
             sum = _mm_fmadd_ps(v0, v1, sum);
@@ -1098,17 +1130,17 @@ namespace op
         __declspec(align(16)) f32 r[4];
         _mm_store_ps(r, sum);
         f32 result = r[0];
-        for(u64 i=qsize; i<size; ++i){
+        for(u64 i = qsize; i < size; ++i) {
             f32 v0 = x0[i];
             f32 v1 = x1[i];
-            result += v0*v1;
+            result += v0 * v1;
         }
         return result;
     }
 
     f32 kahan_sum(u64 size, const f32* src)
     {
-        u64 qsize = (size>>2)<<2;
+        u64 qsize = (size >> 2) << 2;
         f32 sum = 0.0f;
         {
             __m128 s = _mm_setzero_ps();
@@ -1127,11 +1159,11 @@ namespace op
 
         {
             f32 c = 0.0f;
-            for(u64 i=qsize; i<size; ++i){
+            for(u64 i = qsize; i < size; ++i) {
                 f32 x = src[i];
-                f32 y = x-c;
-                f32 t = sum+y;
-                c = (t-sum)-y;
+                f32 y = x - c;
+                f32 t = sum + y;
+                c = (t - sum) - y;
                 sum = t;
             }
         }
@@ -1140,7 +1172,7 @@ namespace op
 
     f32 kahan_sum_squared(u64 size, const f32* src, f32 mean)
     {
-        u64 qsize = (size>>2)<<2;
+        u64 qsize = (size >> 2) << 2;
         __m128 qmean = _mm_set1_ps(mean);
         f32 sum = 0.0f;
         {
@@ -1161,13 +1193,13 @@ namespace op
         }
         {
             f32 c = 0.0f;
-            for(u64 i=qsize; i<size; ++i){
+            for(u64 i = qsize; i < size; ++i) {
                 f32 x = src[i];
-                x = x-mean;
-                x = x*x;
-                f32 y = x-c;
-                f32 t = sum+y;
-                c = (t-sum)-y;
+                x = x - mean;
+                x = x * x;
+                f32 y = x - c;
+                f32 t = sum + y;
+                c = (t - sum) - y;
                 sum = t;
             }
         }
@@ -1185,17 +1217,17 @@ namespace op
 
         // normalize
         static constexpr f32 eps = 1e-06f;
-        u64 qsize = (size>>2)<<2;
+        u64 qsize = (size >> 2) << 2;
         {
             __m128 qeps = _mm_set1_ps(eps);
             __m128 qmean = _mm_set1_ps(mean);
             __m128 qstddev = _mm_set1_ps(stddev);
             __declspec(align(16)) f32 r[4];
-            for(u64 i = 0; i < qsize; i+=4) {
+            for(u64 i = 0; i < qsize; i += 4) {
                 __m128 x = _mm_loadu_ps(&src[i]);
                 __m128 w = _mm_loadu_ps(&weight[i]);
                 __m128 b = _mm_loadu_ps(&bias[i]);
-                __m128 normalized = _mm_div_ps(_mm_sub_ps(x,qmean), _mm_add_ps(qstddev, qeps));
+                __m128 normalized = _mm_div_ps(_mm_sub_ps(x, qmean), _mm_add_ps(qstddev, qeps));
                 normalized = _mm_add_ps(_mm_mul_ps(normalized, w), b);
                 _mm_store_ps(r, normalized);
                 dst[i + 0] = r[0];
@@ -1243,31 +1275,82 @@ namespace op
         const u64 d_embed = emb_weight.size(1);
         u64 total_size = tokens.total_size();
         Tensor result(ggml_type::GGML_TYPE_F32, {total_size, d_embed});
-        for(u64 i=0; i<total_size; ++i){
+        for(u64 i = 0; i < total_size; ++i) {
             const s32 emb_index = tokens.data<s32>()[i];
             const s32 emb_offset = emb_index * d_embed;
-            const s32 out_offset = i*d_embed;
+            const s32 out_offset = i * d_embed;
             const f32* src = emb_weight.data<f32>() + emb_offset;
             f32* dst = result.data<f32>() + out_offset;
-            ::memcpy(dst, src, sizeof(f32)*d_embed);
+            ::memcpy(dst, src, sizeof(f32) * d_embed);
         }
         return std::move(result);
     }
 
-    Tensor&&  embed_projection(const Tensor& input, const Tensor& emb_weight)
-{
-    const u64 n_ctx = input.size(0);
-    const u64 n_vocab = emb_weight.size(0);
-    const u64 n_embed = emb_weight.size(1);
+    Tensor&& embed_projection(const Tensor& input, const Tensor& emb_weight)
+    {
+        const u64 n_ctx = input.size(0);
+        const u64 n_vocab = emb_weight.size(0);
+        const u64 n_embed = emb_weight.size(1);
 
-    // Offsets input ptr to the start of the final vector in the inp tensor.
-    const u64 offset = (n_ctx - 1) * n_embed;
-    Tensor result(ggml_type::GGML_TYPE_F32, {n_vocab});
-    for(u64 i=0; i<n_vocab; ++i){
-        const f32* emb = emb_weight.data<f32>() + i*n_embed;
-        result.data<f32>()[i] = dot_product(n_embed, input.data<f32>()+offset, emb);
+        // Offsets input ptr to the start of the final vector in the inp tensor.
+        const u64 offset = (n_ctx - 1) * n_embed;
+        Tensor result(ggml_type::GGML_TYPE_F32, {n_vocab});
+        for(u64 i = 0; i < n_vocab; ++i) {
+            const f32* emb = emb_weight.data<f32>() + i * n_embed;
+            result.data<f32>()[i] = dot_product(n_embed, input.data<f32>() + offset, emb);
+        }
     }
-}
+
+    Tensor&& gelu(const Tensor& input)
+    {
+        assert(ggml_type::GGML_TYPE_F32 == input.type());
+        const u64 n_vectors = input.size(0);
+
+        Tensor result(ggml_type::GGML_TYPE_F32, {n_vectors});
+        u64 end = input.total_size();
+        for(u64 i = 0; i < end; ++i) {
+            f32 x = input.data<f32>()[i];
+            f32 res = 0.5f * x
+                      * (1.0f + std::tanh(0.79788456079f // std::sqrt(2.0f / 3.141592653589793f)
+                                          * (x + 0.044715f * std::pow(x, 3.0f))));
+            result.data<f32>()[i] = res;
+        }
+        return std::move(result);
+    }
+
+    void vec_add(u64 size, f32* dst, const f32* src0, const f32* src1)
+    {
+        u64 qsize = (size >> 2) << 2;
+        for(u64 i = 0; i < qsize; i += 4) {
+            __m128 x0 = _mm_loadu_ps(&src0[i]);
+            __m128 x1 = _mm_loadu_ps(&src1[i]);
+            __m128 sum = _mm_add_ps(x0, x1);
+            _mm_storeu_ps(&dst[i], sum);
+        }
+        for(u64 i = qsize; i < size; ++i) {
+            f32 x0 = src0[i];
+            f32 x1 = src1[i];
+            dst[i] = x0 + x1;
+        }
+    }
+
+    Tensor&& add(const Tensor& x0, const Tensor& x1)
+    {
+        assert(ggml_type::GGML_TYPE_F32 == x0.type());
+        assert(ggml_type::GGML_TYPE_F32 == x1.type());
+        const u64 nrows = x0.size(0);
+        const u64 ncols = x0.size(1);
+
+        Tensor result(ggml_type::GGML_TYPE_F32, {nrows, ncols});
+        for(u64 i = 0; i < nrows; ++i) {
+            u64 offset = i * ncols;
+            const f32* row0 = x0.data<f32>() + offset;
+            const f32* row1 = x1.data<f32>() + offset;
+            f32* dst = result.data<f32>() + offset;
+            vec_add(ncols, dst, row0, row1);
+        }
+        return std::move(result);
+    }
 
 } // namespace op
 
@@ -1283,8 +1366,8 @@ LayerNorm::LayerNorm(
     u32 d_out,
     void* weight,
     void* bias)
-    :weight_(type, {d_out, d_in}, weight)
-    ,bias_(type, {d_out}, bias)
+    : weight_(type, {d_out, d_in}, weight)
+    , bias_(type, {d_out}, bias)
 {
 }
 
@@ -1311,7 +1394,7 @@ Embedding::Embedding(
     u32 n_vocab,
     u32 d_embed,
     void* weight)
-    :weight_(type, {n_vocab, d_embed}, weight)
+    : weight_(type, {n_vocab, d_embed}, weight)
 {
 }
 
@@ -1333,11 +1416,78 @@ Tensor&& Embedding::forward_proj(const Tensor& input)
     return std::move(op::embed_projection(input, weight_));
 }
 
+//--- PositionalEmbedding
+//-----------------------------------------------------------
+PositionalEmbedding::PositionalEmbedding()
+{
+}
+
+PositionalEmbedding::PositionalEmbedding(
+    ggml_type type,
+    u64 max_context,
+    u64 d_embed,
+    void* weight)
+    : weight_(type, {max_context, d_embed}, weight)
+{
+}
+
+PositionalEmbedding::~PositionalEmbedding()
+{
+}
+
+Tensor&& PositionalEmbedding::forward(u64 num_context)
+{
+    assert(num_context <= weight_.size(0));
+    Tensor weightf = std::move(op::convertF32(weight_));
+    Tensor result(ggml_type::GGML_TYPE_F32, {num_context, weight_.size(1)});
+    for(u64 i = 0; i < num_context; ++i) {
+        u64 offset = i * weight_.size(1);
+        const f32* src = weightf.data<f32>() + offset;
+        f32* dst = result.data<f32>() + offset;
+        ::memcpy(dst, src, sizeof(f32) * weight_.size(1));
+    }
+    return std::move(result);
+}
+
+//--- GELU
+//-----------------------------------------------------------
+GELU::GELU()
+{
+}
+
+GELU::~GELU()
+{
+}
+
+Tensor&& GELU::forward(const Tensor& input)
+{
+    return std::move(op::gelu(input));
+}
+
+//--- Residual
+//-----------------------------------------------------------
+Residual::Residual()
+{
+}
+
+Residual::~Residual()
+{
+}
+
+Tensor&& Residual::forward(const Tensor& input0, const Tensor& input1)
+{
+    assert(input0.type() == input1.type());
+    assert(input0.num_dims() == 2);
+    assert(input1.num_dims() == 2);
+    assert(is_same_shape(input0, input1));
+    return std::move(op::add(input0, input1));
+}
+
 //--- RMSNorm
 //-----------------------------------------------------------
 RMSNorm::RMSNorm(ggml_type type, u32 dimensions, f32 epsilon)
     : epsilon_(epsilon)
-    ,weight_(type, {dimensions})
+    , weight_(type, {dimensions})
 {
 }
 
