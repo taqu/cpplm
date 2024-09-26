@@ -4,6 +4,127 @@
 #include <immintrin.h>
 #include <mimalloc-2.1/mimalloc.h>
 
+// new/delete
+void* operator new(std::size_t size)
+{
+    return cppgpt::allocate(size);
+}
+
+void* operator new(std::size_t size, std::align_val_t alignment)
+{
+    return cppgpt::allocate(size, static_cast<std::size_t>(alignment));
+}
+
+void* operator new(std::size_t size, const std::nothrow_t&) noexcept
+{
+    return cppgpt::allocate(size);
+}
+
+void* operator new(std::size_t size, std::align_val_t alignment, const std::nothrow_t&) noexcept
+{
+    return cppgpt::allocate(size, static_cast<std::size_t>(alignment));
+}
+
+void* operator new(std::size_t /*size*/, void* ptr) noexcept
+{
+    return ptr;
+}
+
+void operator delete(void* ptr) noexcept
+{
+    cppgpt::deallocate(ptr);
+}
+
+void operator delete(void* ptr, std::size_t /*size*/) noexcept
+{
+    cppgpt::deallocate(ptr);
+}
+
+void operator delete(void* ptr, std::align_val_t alignment) noexcept
+{
+    cppgpt::deallocate(ptr, static_cast<std::size_t>(alignment));
+}
+
+void operator delete(void* ptr, std::size_t /*size*/, std::align_val_t alignment) noexcept
+{
+    cppgpt::deallocate(ptr, static_cast<std::size_t>(alignment));
+}
+
+void operator delete(void* ptr, const std::nothrow_t&) noexcept
+{
+    cppgpt::deallocate(ptr);
+}
+
+void operator delete(void* ptr, std::align_val_t alignment, const std::nothrow_t&) noexcept
+{
+    cppgpt::deallocate(ptr, static_cast<std::size_t>(alignment));
+}
+
+void operator delete(void* ptr, void*) noexcept
+{
+    (void)ptr;
+}
+
+void* operator new[](std::size_t size)
+{
+    return cppgpt::allocate(size);
+}
+
+void* operator new[](std::size_t size, std::align_val_t alignment)
+{
+    return cppgpt::allocate(size, static_cast<std::size_t>(alignment));
+}
+
+void* operator new[](std::size_t size, const std::nothrow_t&) noexcept
+{
+    return cppgpt::allocate(size);
+}
+
+void* operator new[](std::size_t size, std::align_val_t alignment, const std::nothrow_t&) noexcept
+{
+    return cppgpt::allocate(size, static_cast<std::size_t>(alignment));
+}
+
+void* operator new[](std::size_t /*size*/, void* ptr) noexcept
+{
+    return ptr;
+}
+
+void operator delete[](void* ptr) noexcept
+{
+    cppgpt::deallocate(ptr);
+}
+
+void operator delete[](void* ptr, std::size_t /*size*/) noexcept
+{
+    cppgpt::deallocate(ptr);
+}
+
+void operator delete[](void* ptr, std::align_val_t alignment) noexcept
+{
+    cppgpt::deallocate(ptr, static_cast<std::size_t>(alignment));
+}
+
+void operator delete[](void* ptr, std::size_t /*size*/, std::align_val_t alignment) noexcept
+{
+    cppgpt::deallocate(ptr, static_cast<std::size_t>(alignment));
+}
+
+void operator delete[](void* ptr, const std::nothrow_t&) noexcept
+{
+    cppgpt::deallocate(ptr);
+}
+
+void operator delete[](void* ptr, std::align_val_t alignment, const std::nothrow_t&) noexcept
+{
+    cppgpt::deallocate(ptr, static_cast<std::size_t>(alignment));
+}
+
+void operator delete[](void* ptr, void*) noexcept
+{
+    (void)ptr;
+}
+
 namespace cppgpt
 {
 namespace
@@ -710,9 +831,24 @@ void deallocate(void* ptr, size_t align)
     mi_free_aligned(ptr, align);
 }
 
+//--- Timer
+//-----------------------------------------------------------
+Timer::Timer(s64& duration)
+    : duration_(duration)
+    , start_(std::chrono::high_resolution_clock::now())
+{
+    duration_ = 0;
+}
+
+Timer::~Timer()
+{
+    std::chrono::high_resolution_clock::time_point end = std::chrono::high_resolution_clock::now();
+    std::chrono::high_resolution_clock::duration duration = end - start_;
+    duration_ = std::chrono::duration_cast<std::chrono::milliseconds>(duration).count();
+}
+
 //--- Memory
 //-----------------------------------------------------------
-
 Memory::Memory()
     : size_(0)
     , ptr_(nullptr)
@@ -906,6 +1042,11 @@ Tensor::Tensor(ggml_type type, std::initializer_list<u64> dimensions, void* data
 {
     assert(0 < num_dims_ && num_dims_ <= GGML_MAX_DIMS);
     assert(nullptr != data);
+    u32 i = 0;
+    for(const u64& x: dimensions) {
+        dims_[i] = x;
+        ++i;
+    }
 }
 
 Tensor::Tensor(ggml_type type, const Tensor& shape)
@@ -923,6 +1064,19 @@ Tensor::Tensor(ggml_type type, const Tensor& shape)
     }
     u64 total_in_bytes = total_size * get_byte_size_aligned(type_);
     data_ = std::unique_ptr<u8[], CustomDeleter>(new u8[total_in_bytes], CustomDeleter(false));
+}
+
+Tensor::Tensor(ggml_type type, const Tensor& shape, void* data)
+    : type_(type)
+    , num_dims_(static_cast<u16>(shape.num_dims()))
+    , data_(static_cast<u8*>(data), CustomDeleter(true))
+    , bit_packed_(1)
+{
+    assert(0 < num_dims_ && num_dims_ <= GGML_MAX_DIMS);
+    assert(nullptr != data);
+    for(u32 i = 0; i < num_dims_; ++i) {
+        dims_[i] = shape.dims_[i];
+    }
 }
 
 Tensor::Tensor(Tensor&& other)
@@ -1022,92 +1176,124 @@ namespace op
 {
     Tensor&& convertF32(const Tensor& input)
     {
-        Tensor result(ggml_type::GGML_TYPE_F32, input);
+        if(ggml_type::GGML_TYPE_F32 == input.type()){
+            Tensor result(ggml_type::GGML_TYPE_F32, input, input.data<void>());
+            return std::move(result);
+        }
         u64 size = input.total_size();
+        Tensor result(ggml_type::GGML_TYPE_F32, input);
         switch(input.type()) {
         case ggml_type::GGML_TYPE_F32:
             util::copyf32_f(size, result.data<void>(), input.data<void>());
             break;
-        case ggml_type::GGML_TYPE_F16:
+        case ggml_type::GGML_TYPE_F16:{
+                Tensor result(ggml_type::GGML_TYPE_F32, input);
             util::copyf16_f(size, result.data<void>(), input.data<void>());
+            }
             break;
-        case ggml_type::GGML_TYPE_Q4_0:
+        case ggml_type::GGML_TYPE_Q4_0:{
             util::copy4_f(size, result.data<void>(), input.data<void>());
+            }
             break;
-        case ggml_type::GGML_TYPE_Q4_1:
+        case ggml_type::GGML_TYPE_Q4_1:{
             util::copy4_f(size, result.data<void>(), input.data<void>());
+            }
             break;
-        case ggml_type::GGML_TYPE_Q5_0:
+        case ggml_type::GGML_TYPE_Q5_0:{
             util::copy5_f(size, result.data<void>(), input.data<void>());
+            }
             break;
-        case ggml_type::GGML_TYPE_Q5_1:
+        case ggml_type::GGML_TYPE_Q5_1:{
             util::copy5_f(size, result.data<void>(), input.data<void>());
+            }
             break;
-        case ggml_type::GGML_TYPE_Q8_0:
+        case ggml_type::GGML_TYPE_Q8_0:{
             util::copy8_f(size, result.data<void>(), input.data<void>());
+            }
             break;
-        case ggml_type::GGML_TYPE_Q8_1:
+        case ggml_type::GGML_TYPE_Q8_1:{
             util::copy8_f(size, result.data<void>(), input.data<void>());
+            }
             break;
-        case ggml_type::GGML_TYPE_Q2_K:
+        case ggml_type::GGML_TYPE_Q2_K:{
             util::copy2_f(size, result.data<void>(), input.data<void>());
+            }
             break;
-        case ggml_type::GGML_TYPE_Q3_K:
+        case ggml_type::GGML_TYPE_Q3_K:{
             util::copy3_f(size, result.data<void>(), input.data<void>());
+            }
             break;
-        case ggml_type::GGML_TYPE_Q4_K:
+        case ggml_type::GGML_TYPE_Q4_K:{
             util::copy4_f(size, result.data<void>(), input.data<void>());
+            }
             break;
-        case ggml_type::GGML_TYPE_Q5_K:
+        case ggml_type::GGML_TYPE_Q5_K:{
             util::copy5_f(size, result.data<void>(), input.data<void>());
+            }
             break;
-        case ggml_type::GGML_TYPE_Q6_K:
+        case ggml_type::GGML_TYPE_Q6_K:{
             util::copy6_f(size, result.data<void>(), input.data<void>());
+            }
             break;
-        case ggml_type::GGML_TYPE_Q8_K:
+        case ggml_type::GGML_TYPE_Q8_K:{
             util::copy8_f(size, result.data<void>(), input.data<void>());
+            }
             break;
-        case ggml_type::GGML_TYPE_IQ2_XXS:
+        case ggml_type::GGML_TYPE_IQ2_XXS:{
             util::copy2_f(size, result.data<void>(), input.data<void>());
+            }
             break;
-        case ggml_type::GGML_TYPE_IQ2_XS:
+        case ggml_type::GGML_TYPE_IQ2_XS:{
             util::copy2_f(size, result.data<void>(), input.data<void>());
+            }
             break;
-        case ggml_type::GGML_TYPE_IQ3_XXS:
+        case ggml_type::GGML_TYPE_IQ3_XXS:{
             util::copy3_f(size, result.data<void>(), input.data<void>());
+            }
             break;
-        case ggml_type::GGML_TYPE_IQ1_S:
+        case ggml_type::GGML_TYPE_IQ1_S:{
             util::copy1_f(size, result.data<void>(), input.data<void>());
+            }
             break;
-        case ggml_type::GGML_TYPE_IQ4_NL:
+        case ggml_type::GGML_TYPE_IQ4_NL:{
             util::copy4_f(size, result.data<void>(), input.data<void>());
+            }
             break;
-        case ggml_type::GGML_TYPE_IQ3_S:
+        case ggml_type::GGML_TYPE_IQ3_S:{
             util::copy3_f(size, result.data<void>(), input.data<void>());
+            }
             break;
-        case ggml_type::GGML_TYPE_IQ2_S:
+        case ggml_type::GGML_TYPE_IQ2_S:{
             util::copy2_f(size, result.data<void>(), input.data<void>());
+            }
             break;
-        case ggml_type::GGML_TYPE_IQ4_XS:
+        case ggml_type::GGML_TYPE_IQ4_XS:{
             util::copy4_f(size, result.data<void>(), input.data<void>());
+            }
             break;
-        case ggml_type::GGML_TYPE_I8:
+        case ggml_type::GGML_TYPE_I8:{
             util::copyi8_f(size, result.data<void>(), input.data<void>());
+            }
             break;
-        case ggml_type::GGML_TYPE_I16:
+        case ggml_type::GGML_TYPE_I16:{
             util::copyi16_f(size, result.data<void>(), input.data<void>());
+            }
             break;
-        case ggml_type::GGML_TYPE_I32:
+        case ggml_type::GGML_TYPE_I32:{
             util::copyi32_f(size, result.data<void>(), input.data<void>());
+            }
             break;
-        case ggml_type::GGML_TYPE_I64:
+        case ggml_type::GGML_TYPE_I64:{
             util::copyi64_f(size, result.data<void>(), input.data<void>());
+            }
             break;
-        case ggml_type::GGML_TYPE_F64:
+        case ggml_type::GGML_TYPE_F64:{
             util::copyf64_f(size, result.data<void>(), input.data<void>());
+            }
             break;
-        case ggml_type::GGML_TYPE_IQ1_M:
+        case ggml_type::GGML_TYPE_IQ1_M:{
             util::copy1_f(size, result.data<void>(), input.data<void>());
+            }
             break;
         default:
             assert(false);
@@ -1440,7 +1626,7 @@ namespace op
                 } // for(u64 i
 
             } // for(u64 qrow
-        }     // for(u64 h
+        } // for(u64 h
     }
 
     void qkv_attn_matmul(Tensor& qkv, const Tensor& qk, const Tensor& v, u64 n_heads)
@@ -1464,8 +1650,8 @@ namespace op
                     u64 qkv_i = h * d_head + qkrow * d_embed + vcol;
                     qkv.data<f32>()[qkv_i] = dot;
                 } // for(u64 vcol
-            }     // for(u64 qkrow
-        }         // for(u64 h
+            } // for(u64 qkrow
+        } // for(u64 h
     }
 
 } // namespace op
@@ -1473,6 +1659,7 @@ namespace op
 //--- LayerNorm
 //-----------------------------------------------------------
 LayerNorm::LayerNorm()
+    :duration_(0)
 {
 }
 
@@ -1482,7 +1669,8 @@ LayerNorm::LayerNorm(
     u32 d_out,
     void* weight,
     void* bias)
-    : weight_(type, {d_out, d_in}, weight)
+    : duration_(0)
+    , weight_(type, {d_out, d_in}, weight)
     , bias_(type, {d_out}, bias)
 {
 }
@@ -1494,6 +1682,7 @@ LayerNorm::~LayerNorm()
 Tensor&& LayerNorm::forward(const Tensor& input)
 {
     assert(weight_.size(0) == input.size(1));
+    Timer timer(duration_);
     const u32 d_embed = weight_.size(0);
 
     return std::move(op::normalize(input, weight_, bias_));
@@ -1502,6 +1691,7 @@ Tensor&& LayerNorm::forward(const Tensor& input)
 //--- Embedding
 //-----------------------------------------------------------
 Embedding::Embedding()
+:duration_(0)
 {
 }
 
@@ -1510,7 +1700,8 @@ Embedding::Embedding(
     u32 n_vocab,
     u32 d_embed,
     void* weight)
-    : weight_(type, {n_vocab, d_embed}, weight)
+    : duration_(0)
+    ,weight_(type, {n_vocab, d_embed}, weight)
 {
 }
 
@@ -1522,6 +1713,7 @@ Tensor&& Embedding::forward(const Tensor& input)
 {
     assert(ggml_type::GGML_TYPE_I32 == input.type());
     assert(input.num_dims() == 1);
+    Timer timer(duration_);
     return std::move(op::embed_tokens(input, weight_));
 }
 
@@ -1529,12 +1721,14 @@ Tensor&& Embedding::forward_proj(const Tensor& input)
 {
     assert(input.num_dims() == 2);
     assert(weight_.size(1) == input.size(1));
+    Timer timer(duration_);
     return std::move(op::embed_projection(input, weight_));
 }
 
 //--- PositionalEmbedding
 //-----------------------------------------------------------
 PositionalEmbedding::PositionalEmbedding()
+    :duration_(0)
 {
 }
 
@@ -1543,7 +1737,8 @@ PositionalEmbedding::PositionalEmbedding(
     u64 max_context,
     u64 d_embed,
     void* weight)
-    : weight_(type, {max_context, d_embed}, weight)
+    : duration_(0)
+    ,weight_(type, {max_context, d_embed}, weight)
 {
 }
 
@@ -1554,6 +1749,7 @@ PositionalEmbedding::~PositionalEmbedding()
 Tensor&& PositionalEmbedding::forward(u64 num_context)
 {
     assert(num_context <= weight_.size(0));
+    Timer timer(duration_);
     Tensor weightf = std::move(op::convertF32(weight_));
     Tensor result(ggml_type::GGML_TYPE_F32, {num_context, weight_.size(1)});
     for(u64 i = 0; i < num_context; ++i) {
@@ -1568,6 +1764,7 @@ Tensor&& PositionalEmbedding::forward(u64 num_context)
 //--- GELU
 //-----------------------------------------------------------
 GELU::GELU()
+    :duration_(0)
 {
 }
 
@@ -1577,12 +1774,14 @@ GELU::~GELU()
 
 Tensor&& GELU::forward(const Tensor& input)
 {
+    Timer timer(duration_);
     return std::move(op::gelu(input));
 }
 
 //--- Residual
 //-----------------------------------------------------------
 Residual::Residual()
+    :duration_(0)
 {
 }
 
@@ -1596,13 +1795,20 @@ Tensor&& Residual::forward(const Tensor& input0, const Tensor& input1)
     assert(input0.num_dims() == 2);
     assert(input1.num_dims() == 2);
     assert(is_same_shape(input0, input1));
+    Timer timer(duration_);
     return std::move(op::add(input0, input1));
 }
 
 //--- Linear
 //-----------------------------------------------------------
+Linear::Linear()
+    :duration_(0)
+{
+}
+
 Linear::Linear(ggml_type type, u64 d_in, u64 d_out, void* weight, void* bias)
-    : weight_(type, {d_out, d_in}, weight)
+    : duration_(0)
+    , weight_(type, {d_out, d_in}, weight)
     , bias_(type, {d_out}, bias)
 {
 }
@@ -1615,11 +1821,18 @@ Tensor&& Linear::forward(const Tensor& input)
 {
     assert(2 == input.num_dims());
     assert(input.size(1) == weight_.size(1));
+    Timer timer(duration_);
     return std::move(op::affine_proj_2d(input, weight_, bias_));
 }
 
 //--- MultiHeadSelfAttn
 //-----------------------------------------------------------
+MultiHeadSelfAttn::MultiHeadSelfAttn()
+    :duration_(0)
+    ,n_heads_(0)
+{
+}
+
 MultiHeadSelfAttn::MultiHeadSelfAttn(
     ggml_type type,
     u64 n_heads,
@@ -1632,7 +1845,8 @@ MultiHeadSelfAttn::MultiHeadSelfAttn(
     void* value_b,
     void* qkv_proj_w,
     void* qkv_proj_b)
-    : n_heads_(n_heads)
+    : duration_(0)
+    ,n_heads_(n_heads)
     , query_(type, n_embed, n_embed, query_w, query_b)
     , key_(type, n_embed, n_embed, key_w, key_b)
     , value_(type, n_embed, n_embed, value_w, value_b)
@@ -1643,6 +1857,7 @@ MultiHeadSelfAttn::MultiHeadSelfAttn(
 Tensor&& MultiHeadSelfAttn::forward(const Tensor& input)
 {
     assert(2 == input.num_dims());
+    Timer timer(duration_);
 
     Tensor q = query_.forward(input);
     Tensor k = key_.forward(input);
@@ -1666,10 +1881,39 @@ Tensor&& MultiHeadSelfAttn::masked_qkv_attn(const Tensor& q, const Tensor& k, co
     return std::move(qkv);
 }
 
+//--- ResidualAttnBlock
+//-----------------------------------------------------------
+ResidualAttnBlock::ResidualAttnBlock()
+    :duration_(0)
+{
+}
+
+//ResidualAttnBlock::ResidualAttnBlock(ggml_type type, u64 n_attn_heads, u64 d_embed, u64 d_mlp, u64 max_ctx)
+//    : attn_ln_(type, max_ctx, d_embed,LayerNorm(max_ctx, d_embed)},
+//      attn{MultiHeadSelfAttn(n_attn_heads, d_embed, max_ctx)},
+//      inp_res{Residual(max_ctx, d_embed)},
+//      mlp_ln{LayerNorm(max_ctx, d_embed)},
+//      mlp_fc{Linear(d_embed, d_mlp, max_ctx)},
+//      gelu{GELU(max_ctx, d_mlp, /*cache_ctx_acv=*/true)},
+//      mlp_proj{Linear(d_mlp, d_embed, max_ctx)},
+//      attn_res{Residual(max_ctx, d_embed)}
+//{
+//}
+
+Tensor&& ResidualAttnBlock::forward(const Tensor& input)
+{
+    Timer timer(duration_);
+    Tensor attn_out = inp_res.forward(inp, attn.forward(attn_ln.forward(inp)));
+    Tensor out = attn_res.forward(attn_out,
+        mlp_proj.forward(gelu.forward(mlp_fc.forward(mlp_ln.forward(attn_out)))));
+    return out;
+}
+
 //--- RMSNorm
 //-----------------------------------------------------------
 RMSNorm::RMSNorm(ggml_type type, u32 dimensions, f32 epsilon)
-    : epsilon_(epsilon)
+    : duration_(0)
+    ,epsilon_(epsilon)
     , weight_(type, {dimensions})
 {
 }

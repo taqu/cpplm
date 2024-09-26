@@ -2,9 +2,37 @@
 #define INC_CPPGPT_H_
 #include "gguf.h"
 #include <cassert>
+#include <chrono>
 #include <cstdint>
 #include <initializer_list>
 #include <memory>
+
+// new/delete
+void* operator new(std::size_t size);
+void* operator new(std::size_t size, std::align_val_t alignment);
+void* operator new(std::size_t size, const std::nothrow_t&) noexcept;
+void* operator new(std::size_t size, std::align_val_t alignment, const std::nothrow_t&) noexcept;
+void* operator new(std::size_t size, void* ptr) noexcept;
+void operator delete(void* ptr) noexcept;
+void operator delete(void* ptr, std::size_t size) noexcept;
+void operator delete(void* ptr, std::align_val_t alignment) noexcept;
+void operator delete(void* ptr, std::size_t size, std::align_val_t alignment) noexcept;
+void operator delete(void* ptr, const std::nothrow_t&) noexcept;
+void operator delete(void* ptr, std::align_val_t alignment, const std::nothrow_t&) noexcept;
+void operator delete(void* ptr, void*) noexcept;
+
+void* operator new[](std::size_t size);
+void* operator new[](std::size_t size, std::align_val_t alignment);
+void* operator new[](std::size_t size, const std::nothrow_t&) noexcept;
+void* operator new[](std::size_t size, std::align_val_t alignment, const std::nothrow_t&) noexcept;
+void* operator new[](std::size_t size, void* ptr) noexcept;
+void operator delete[](void* ptr) noexcept;
+void operator delete[](void* ptr, std::size_t size) noexcept;
+void operator delete[](void* ptr, std::align_val_t alignment) noexcept;
+void operator delete[](void* ptr, std::size_t size, std::align_val_t alignment) noexcept;
+void operator delete[](void* ptr, const std::nothrow_t&) noexcept;
+void operator delete[](void* ptr, std::align_val_t alignment, const std::nothrow_t&) noexcept;
+void operator delete[](void* ptr, void*) noexcept;
 
 namespace cppgpt
 {
@@ -28,8 +56,8 @@ static constexpr u32 GGML_MAX_NAME = 64;
 static constexpr u32 GGML_MAX_SRC = 16;
 static constexpr u32 GGML_MAX_OP_PARAMS = 64;
 
-void* allocate(size_t size, size_t align=16);
-void deallocate(void* ptr, size_t align=16);
+void* allocate(size_t size, size_t align = 16);
+void deallocate(void* ptr, size_t align = 16);
 
 // available tensor operations
 enum class ggml_op
@@ -153,7 +181,20 @@ namespace util
     void copyf16_f(u64 size, void* dst, const void* src);
     void copyf32_f(u64 size, void* dst, const void* src);
     void copyf64_f(u64 size, void* dst, const void* src);
-}
+} // namespace util
+
+//--- Timer
+//-----------------------------------------------------------
+class Timer
+{
+public:
+    Timer(s64& duration);
+    ~Timer();
+
+private:
+    s64& duration_;
+    std::chrono::high_resolution_clock::time_point start_;
+};
 
 //--- Memory
 //-----------------------------------------------------------
@@ -199,6 +240,7 @@ public:
     Tensor(ggml_type type, std::initializer_list<u64> dimensions);
     Tensor(ggml_type type, std::initializer_list<u64> dimensions, void* data);
     Tensor(ggml_type type, const Tensor& shape);
+    Tensor(ggml_type type, const Tensor& shape, void* data);
     Tensor(Tensor&& other);
     ~Tensor();
     Tensor& operator=(Tensor&& other);
@@ -208,19 +250,20 @@ public:
     u64 total_bytes() const;
     u64 size(u32 index) const;
 
-    template <typename T>
+    template<typename T>
     const T* data() const
-    { 
-        return reinterpret_cast<const T*>(data_.get()); 
+    {
+        return reinterpret_cast<const T*>(data_.get());
     }
 
-    template <typename T>
+    template<typename T>
     T* data()
-    { 
-        return reinterpret_cast<T*>(data_.get()); 
+    {
+        return reinterpret_cast<T*>(data_.get());
     }
 
     void resize(std::initializer_list<u64> dimensions) noexcept;
+
 private:
     Tensor(const Tensor&) = delete;
     Tensor& operator=(const Tensor&) = delete;
@@ -229,13 +272,13 @@ private:
     struct CustomDeleter
     {
         constexpr CustomDeleter(bool dummy) noexcept
-            :dummy_(dummy)
+            : dummy_(dummy)
         {
         }
 
         void operator()(u8* ptr) const
         {
-            if(dummy_){
+            if(dummy_) {
                 return;
             }
             delete[] ptr;
@@ -263,7 +306,7 @@ namespace op
     void vec_add(u64 size, f32* dst, const f32* src0, const f32* src1);
     Tensor&& add(const Tensor& x0, const Tensor& x1);
     Tensor&& affine_proj_2d(const Tensor& input, const Tensor& weight, const Tensor& bias);
-}
+} // namespace op
 
 bool is_same_shape(const Tensor& x0, const Tensor& x1);
 
@@ -282,7 +325,9 @@ public:
     ~LayerNorm();
     Tensor&& forward(const Tensor& input);
 
+    inline s64 time() const{ return duration_;}
 private:
+    s64 duration_;
     Tensor weight_;
     Tensor bias_;
 };
@@ -302,7 +347,9 @@ public:
     Tensor&& forward(const Tensor& input);
     Tensor&& forward_proj(const Tensor& input);
 
+    inline s64 time() const{ return duration_;}
 private:
+    s64 duration_;
     Tensor weight_;
 };
 
@@ -320,7 +367,9 @@ public:
     ~PositionalEmbedding();
     Tensor&& forward(u64 num_context);
 
+    inline s64 time() const{ return duration_;}
 private:
+    s64 duration_;
     Tensor weight_;
 };
 
@@ -332,7 +381,10 @@ public:
     GELU();
     ~GELU();
     Tensor&& forward(const Tensor& input);
+
+    inline s64 time() const{ return duration_;}
 private:
+    s64 duration_;
 };
 
 //--- Residual
@@ -343,7 +395,10 @@ public:
     Residual();
     ~Residual();
     Tensor&& forward(const Tensor& input0, const Tensor& input1);
+
+    inline s64 time() const{ return duration_;}
 private:
+    s64 duration_;
 };
 
 //--- Linear
@@ -351,12 +406,15 @@ private:
 class Linear
 {
 public:
+    Linear();
     Linear(ggml_type type, u64 d_in, u64 d_out, void* weight, void* bias);
     ~Linear();
 
     Tensor&& forward(const Tensor& input);
 
+    inline s64 time() const{ return duration_;}
 private:
+    s64 duration_;
     Tensor weight_;
     Tensor bias_;
 };
@@ -366,6 +424,7 @@ private:
 class MultiHeadSelfAttn
 {
 public:
+    MultiHeadSelfAttn();
     MultiHeadSelfAttn(
         ggml_type type,
         u64 n_heads,
@@ -380,9 +439,11 @@ public:
         void* qkv_proj_b);
     Tensor&& forward(const Tensor& input);
 
+    inline s64 time() const{ return duration_;}
 private:
     Tensor&& masked_qkv_attn(const Tensor& q, const Tensor& k, const Tensor& v);
 
+    s64 duration_;
     u64 n_heads_;
     Linear query_;
     Linear key_;
@@ -393,28 +454,28 @@ private:
 class ResidualAttnBlock
 {
 public:
-    ResidualAttnBlock(int n_attn_heads, int d_embed, int d_mlp, int max_ctx);
-    Tensor forward(const Tensor& inp);
-    int64_t time_linear() const
-    { return attn.time_linear() + mlp_fc.time() + mlp_proj.time(); }
-    int64_t time_proj() const { return mlp_fc.time() + mlp_proj.time(); }
-    int64_t time_attn_lin() const { return attn.time_linear(); }
-    int64_t time_attn() const { return attn.time_attn(); }
-    int64_t time_ln() const { return attn_ln.time() + mlp_ln.time(); }
-    int64_t time_gelu() const { return gelu.time(); }
-    int64_t time_res() const { return inp_res.time() + attn_res.time(); }
-    void reset_acv_cache() { attn.reset_acv_cache(); attn_ln.reset_acv_cache(); mlp_fc.reset_acv_cache(); mlp_proj.reset_acv_cache();
-                             mlp_ln.reset_acv_cache(); gelu.reset_acv_cache(); inp_res.reset_acv_cache(); attn_res.reset_acv_cache();}
+    ResidualAttnBlock();
+    //ResidualAttnBlock(
+    //    ggml_type type,
+    //    u64 n_attn_heads,
+    //    u64 d_embed,
+    //    u64 d_mlp);
+    Tensor&& forward(const Tensor& input);
+    inline s64 time() const
+    {
+        return duration_;
+    }
 
-public:
-    LayerNorm attn_ln;
-    MultiHeadSelfAttn attn;
-    Residual inp_res;
-    LayerNorm mlp_ln;
-    Linear mlp_fc;
-    GELU gelu;
-    Linear mlp_proj;
-    Residual attn_res;
+private:
+    s64 duration_;
+    LayerNorm attn_ln_;
+    MultiHeadSelfAttn attn_;
+    Residual inp_res_;
+    LayerNorm mlp_ln_;
+    Linear mlp_fc_;
+    GELU gelu_;
+    Linear mlp_proj_;
+    Residual attn_res_;
 };
 
 //--- RMSNorm
@@ -426,6 +487,7 @@ public:
     virtual ~RMSNorm();
 
 private:
+    s64 duration_;
     f32 epsilon_;
     Tensor weight_;
 };
