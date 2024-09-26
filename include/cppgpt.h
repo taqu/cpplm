@@ -257,6 +257,12 @@ namespace op
     f32 kahan_sum_squared(u64 size, const f32* src, f32 mean);
     void normalize_vec(u64 size, f32* dst, const f32* src, const f32* weight, const f32* bias);
     Tensor&& normalize(const Tensor& input, const Tensor& weight, const Tensor& bias);
+    Tensor&& embed_tokens(const Tensor& emb_weight, const Tensor& tokens);
+    Tensor&& embed_projection(const Tensor& input, const Tensor& emb_weight);
+    Tensor&& gelu(const Tensor& input);
+    void vec_add(u64 size, f32* dst, const f32* src0, const f32* src1);
+    Tensor&& add(const Tensor& x0, const Tensor& x1);
+    Tensor&& affine_proj_2d(const Tensor& input, const Tensor& weight, const Tensor& bias);
 }
 
 bool is_same_shape(const Tensor& x0, const Tensor& x1);
@@ -345,23 +351,70 @@ private:
 class Linear
 {
 public:
-    Linear(int d_in, int d_out, int max_ctx);
+    Linear(ggml_type type, u64 d_in, u64 d_out, void* weight, void* bias);
+    ~Linear();
+
+    Tensor&& forward(const Tensor& input);
+
+private:
+    Tensor weight_;
+    Tensor bias_;
+};
+
+//--- MultiHeadSelfAttn
+//-----------------------------------------------------------
+class MultiHeadSelfAttn
+{
+public:
+    MultiHeadSelfAttn(
+        ggml_type type,
+        u64 n_heads,
+        u64 n_embed,
+        void* query_w,
+        void* query_b,
+        void* key_w,
+        void* key_b,
+        void* value_w,
+        void* value_b,
+        void* qkv_proj_w,
+        void* qkv_proj_b);
+    Tensor&& forward(const Tensor& input);
+
+private:
+    Tensor&& masked_qkv_attn(const Tensor& q, const Tensor& k, const Tensor& v);
+
+    u64 n_heads_;
+    Linear query_;
+    Linear key_;
+    Linear value_;
+    Linear qkv_proj_;
+};
+
+class ResidualAttnBlock
+{
+public:
+    ResidualAttnBlock(int n_attn_heads, int d_embed, int d_mlp, int max_ctx);
     Tensor forward(const Tensor& inp);
-    int64_t time() const noexcept { return exec_time_ms_; }
-    void reset_acv_cache() { acv_cached_=false; }
+    int64_t time_linear() const
+    { return attn.time_linear() + mlp_fc.time() + mlp_proj.time(); }
+    int64_t time_proj() const { return mlp_fc.time() + mlp_proj.time(); }
+    int64_t time_attn_lin() const { return attn.time_linear(); }
+    int64_t time_attn() const { return attn.time_attn(); }
+    int64_t time_ln() const { return attn_ln.time() + mlp_ln.time(); }
+    int64_t time_gelu() const { return gelu.time(); }
+    int64_t time_res() const { return inp_res.time() + attn_res.time(); }
+    void reset_acv_cache() { attn.reset_acv_cache(); attn_ln.reset_acv_cache(); mlp_fc.reset_acv_cache(); mlp_proj.reset_acv_cache();
+                             mlp_ln.reset_acv_cache(); gelu.reset_acv_cache(); inp_res.reset_acv_cache(); attn_res.reset_acv_cache();}
 
 public:
-    Tensor weight;
-    Tensor bias;
-
-private:
-    Tensor acv_;
-    bool transpose_out_{false};
-    bool acv_cached_{false};
-    int64_t exec_time_ms_{0};
-
-private:
-    Tensor forward_impl(const Tensor& inp);
+    LayerNorm attn_ln;
+    MultiHeadSelfAttn attn;
+    Residual inp_res;
+    LayerNorm mlp_ln;
+    Linear mlp_fc;
+    GELU gelu;
+    Linear mlp_proj;
+    Residual attn_res;
 };
 
 //--- RMSNorm

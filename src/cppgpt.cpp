@@ -1292,7 +1292,6 @@ namespace op
         const u64 n_vocab = emb_weight.size(0);
         const u64 n_embed = emb_weight.size(1);
 
-        // Offsets input ptr to the start of the final vector in the inp tensor.
         const u64 offset = (n_ctx - 1) * n_embed;
         Tensor result(ggml_type::GGML_TYPE_F32, {n_vocab});
         for(u64 i = 0; i < n_vocab; ++i) {
@@ -1350,6 +1349,123 @@ namespace op
             vec_add(ncols, dst, row0, row1);
         }
         return std::move(result);
+    }
+
+    Tensor&& affine_proj_2d(const Tensor& input, const Tensor& weight, const Tensor& bias)
+    {
+        const u64 nrows0 = input.size(0);
+        const u64 ncols = input.size(1);
+        const u64 nrows1 = weight.size(0);
+
+        Tensor result(ggml_type::GGML_TYPE_F32, {nrows0, nrows1});
+        for(u64 r0 = 0; r0 < nrows0; ++r0) {
+            for(u64 r1 = 0; r1 < nrows1; ++r1) {
+                const f32* row0 = input.data<f32>() + r0 * ncols;
+                const f32* row1 = weight.data<f32>() + r1 * ncols;
+                f32 a = dot_product(ncols, row0, row1);
+                f32 b = bias.data<f32>()[r1];
+                result.data<f32>()[r0 * nrows1 + r1] = a + b;
+            }
+        }
+        return std::move(result);
+    }
+
+    Tensor&& qk_masked_attn_matmul(
+        const Tensor& q,
+        const Tensor& k,
+        const u64 n_heads)
+    {
+        const u64 q_nrows = q.size(0);
+        const u64 ncols = q.size(1);
+        const u64 k_nrows = k.size(0);
+        const u64 d_head = ncols / n_heads;
+        const f32 scale_factor = 1.0f / ::sqrtf(d_head);
+
+        Tensor result(ggml_type::GGML_TYPE_F32, {n_heads, q_nrows, q_nrows});
+        for(u64 h = 0; h < n_heads; ++h) {
+            for(u64 qrow = 0; qrow < q_nrows; ++qrow) {
+                const u64 qrow_offset = h * d_head + qrow * ncols;
+                // We only compute dot products that are not masked. 'k_max' represents
+                // the number of dot products that we should compute for the current q row.
+                const u64 kmax = qrow + 1;
+                for(u64 kcol = 0; kcol < kmax; ++kcol) {
+                    const u64 krow_offset = h * d_head + kcol * ncols;
+                    const f32 dot = dot_product(d_head, q.data<f32>() + qrow_offset, k.data<f32>() + krow_offset);
+                    u64 index = h * q_nrows * k_nrows + qrow * k_nrows + kcol;
+                    result.data<f32>()[index] = dot * scale_factor;
+                }
+            }
+        }
+
+        // Do the masking.
+        for(u64 h = 0; h < n_heads; ++h) {
+            for(u64 qrow = 0; qrow < q_nrows; ++qrow) {
+                const u64 kcol_start = qrow + 1;
+                for(u64 kcol = kcol_start; kcol < k_nrows; ++kcol) {
+                    const u64 index = h * q_nrows * k_nrows + qrow * k_nrows + kcol;
+                    result.data<f32>()[index] = -std::numeric_limits<f32>::infinity();
+                }
+            }
+        }
+        return std::move(result);
+    }
+
+    void qk_softmax(Tensor& qk, u64 n_heads)
+    {
+        const u64 q_ctx = qk.size(1);
+        const u64 k_ctx = qk.size(2);
+
+        for(u64 h = 0; h < n_heads; ++h) {
+            for(u64 qrow = 0; qrow < q_ctx; ++qrow) {
+                f32 max_value = -std::numeric_limits<f32>::infinity();
+                const u64 base = h * q_ctx * k_ctx + qrow * k_ctx;
+                for(u64 i = 0; i < k_ctx; ++i) {
+                    f32 x = qk.data<f32>()[base + i];
+                    if(max_value < x) {
+                        max_value = x;
+                    }
+                } // for(u64 i
+
+                f32 sum_exp = 0.0f;
+                for(u64 i = 0; i < k_ctx; ++i) {
+                    f32 x = qk.data<f32>()[base + i];
+                    f32 exp_value = ::expf(x - max_value);
+                    qk.data<f32>()[base + i] = exp_value;
+                    sum_exp += exp_value;
+                } // for(u64 i
+                f32 inv_sum_exp = 1.0f / sum_exp;
+                for(u64 i = 0; i < k_ctx; ++i) {
+                    f32 x = qk.data<f32>()[base + i];
+                    qk.data<f32>()[base + i] = x * inv_sum_exp;
+                } // for(u64 i
+
+            } // for(u64 qrow
+        }     // for(u64 h
+    }
+
+    void qkv_attn_matmul(Tensor& qkv, const Tensor& qk, const Tensor& v, u64 n_heads)
+    {
+        const u64 qk_nrows = qk.size(1);
+        const u64 qk_ncols = qk.size(2);
+        const u64 d_embed = v.size(1);
+        const u64 d_head = d_embed / n_heads;
+
+        for(u64 h = 0; h < n_heads; ++h) {
+            for(u64 qkrow = 0; qkrow < qk_nrows; ++qkrow) {
+                for(u64 vcol = 0; vcol < d_head; ++vcol) {
+                    f32 dot = 0.0f;
+                    for(u64 i = 0; i < qk_ncols; ++i) {
+                        u64 qk_i = h * qk_nrows * qk_ncols + qkrow * qk_ncols + i;
+                        u64 v_i = h * d_head + i * d_embed + vcol;
+                        f32 qkw = qk.data<f32>()[qk_i];
+                        f32 vw = v.data<f32>()[v_i];
+                        dot += qkw * vw;
+                    }
+                    u64 qkv_i = h * d_head + qkrow * d_embed + vcol;
+                    qkv.data<f32>()[qkv_i] = dot;
+                } // for(u64 vcol
+            }     // for(u64 qkrow
+        }         // for(u64 h
     }
 
 } // namespace op
@@ -1481,6 +1597,73 @@ Tensor&& Residual::forward(const Tensor& input0, const Tensor& input1)
     assert(input1.num_dims() == 2);
     assert(is_same_shape(input0, input1));
     return std::move(op::add(input0, input1));
+}
+
+//--- Linear
+//-----------------------------------------------------------
+Linear::Linear(ggml_type type, u64 d_in, u64 d_out, void* weight, void* bias)
+    : weight_(type, {d_out, d_in}, weight)
+    , bias_(type, {d_out}, bias)
+{
+}
+
+Linear::~Linear()
+{
+}
+
+Tensor&& Linear::forward(const Tensor& input)
+{
+    assert(2 == input.num_dims());
+    assert(input.size(1) == weight_.size(1));
+    return std::move(op::affine_proj_2d(input, weight_, bias_));
+}
+
+//--- MultiHeadSelfAttn
+//-----------------------------------------------------------
+MultiHeadSelfAttn::MultiHeadSelfAttn(
+    ggml_type type,
+    u64 n_heads,
+    u64 n_embed,
+    void* query_w,
+    void* query_b,
+    void* key_w,
+    void* key_b,
+    void* value_w,
+    void* value_b,
+    void* qkv_proj_w,
+    void* qkv_proj_b)
+    : n_heads_(n_heads)
+    , query_(type, n_embed, n_embed, query_w, query_b)
+    , key_(type, n_embed, n_embed, key_w, key_b)
+    , value_(type, n_embed, n_embed, value_w, value_b)
+    , qkv_proj_(type, n_embed, n_embed, qkv_proj_w, qkv_proj_b)
+{
+}
+
+Tensor&& MultiHeadSelfAttn::forward(const Tensor& input)
+{
+    assert(2 == input.num_dims());
+
+    Tensor q = query_.forward(input);
+    Tensor k = key_.forward(input);
+    Tensor v = value_.forward(input);
+
+    Tensor qkv = masked_qkv_attn(q, k, v);
+    Tensor out = qkv_proj_.forward(qkv);
+    return std::move(out);
+}
+
+Tensor&& MultiHeadSelfAttn::masked_qkv_attn(const Tensor& q, const Tensor& k, const Tensor& v)
+{
+    const u64 n_ctx = q.size(0);
+    const u64 d_embed = q.size(1);
+    Tensor qkv(ggml_type::GGML_TYPE_F32, {n_ctx, d_embed});
+
+    Tensor qk = op::qk_masked_attn_matmul(q, k, n_heads_);
+    op::qk_softmax(qk, n_heads_);
+    op::qkv_attn_matmul(qkv, v, qk, n_heads_);
+
+    return std::move(qkv);
 }
 
 //--- RMSNorm
