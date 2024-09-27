@@ -44,16 +44,34 @@ endif()
 
 set(MIMALLOC_ROOT ${THIRDPARTY_DIR}/mimalloc)
 set(MIMALLOC_INCLUDE ${MIMALLOC_ROOT}/include)
-set(MIMALLOC_LIB ${MIMALLOC_ROOT}/lib)
+set(MIMALLOC_LIB ${MIMALLOC_ROOT}/lib/mimalloc-2.1)
+
+set(ABSEIL_ROOT ${THIRDPARTY_DIR}/abseil)
+set(ABSEIL_INCLUDE ${ABSEIL_ROOT}/include)
+set(ABSEIL_LIB ${ABSEIL_ROOT}/lib)
+
+set(RE2_ROOT ${THIRDPARTY_DIR}/re2)
+set(RE2_INCLUDE ${RE2_ROOT}/include)
+set(RE2_LIB ${RE2_ROOT}/lib)
 
 include_directories(AFTER ${MIMALLOC_INCLUDE})
+include_directories(AFTER ${ABSEIL_INCLUDE})
+include_directories(AFTER ${RE2_INCLUDE})
 include_directories(AFTER $ENV{CUDA_PATH}/include)
 
 link_directories(AFTER ${MIMALLOC_LIB})
+link_directories(AFTER ${ABSEIL_LIB})
+link_directories(AFTER ${RE2_LIB})
 link_directories(AFTER $ENV{CUDA_PATH}/lib/x64)
 
 add_library(MIMALLOC MODULE IMPORTED)
-set_target_properties(MIMALLOC PROPERTIES IMPORTED_LOCATION_DEBUG "mimallocd.lib" IMPORTED_LOCATION_RELEASE "mimalloc.lib")
+set_target_properties(MIMALLOC PROPERTIES IMPORTED_LOCATION_DEBUG "mimalloc-staticd.lib" IMPORTED_LOCATION_RELEASE "mimalloc-static.lib")
+
+add_library(ABSEIL MODULE IMPORTED)
+set_target_properties(ABSEIL PROPERTIES IMPORTED_LOCATION_DEBUG "absl_based.lib" IMPORTED_LOCATION_RELEASE "absl_base.lib")
+
+add_library(RE2 MODULE IMPORTED)
+set_target_properties(RE2 PROPERTIES IMPORTED_LOCATION_DEBUG "re2d.lib" IMPORTED_LOCATION_RELEASE "re2.lib")
 
 add_library(OPENCL MODULE IMPORTED)
 set_target_properties(OPENCL PROPERTIES IMPORTED_LOCATION_DEBUG "OpenCL.lib" IMPORTED_LOCATION_RELEASE "OpenCL.lib")
@@ -95,12 +113,12 @@ if(MSVC)
     set(CMAKE_CXX_FLAGS "${DEFAULT_CXX_FLAGS}")
     set(CMAKE_CXX_FLAGS_DEBUG "/D_DEBUG /MTd /Zi /Ob0 /Od /RTC1 /Gy /GR /GS /Gm- /EHsc")
     set(CMAKE_CXX_FLAGS_RELEASE "/MT /O2 /Oi /GL /GR /DNDEBUG /EHsc-")
-    target_link_libraries(${PROJECT_NAME} MIMALLOC OPENCL)
+    target_link_libraries(${PROJECT_NAME} MIMALLOC RE2 OPENCL)
 
 elseif(UNIX)
     set(DEFAULT_CXX_FLAGS "-Wall -O2 -std=c++20 -std=gnu++20 -march=x86-64-v3 -fno-exceptions")
     set(CMAKE_CXX_FLAGS "${DEFAULT_CXX_FLAGS}")
-    target_link_libraries(${PROJECT_NAME} MIMALLOC OPENCL)
+    target_link_libraries(${PROJECT_NAME} MIMALLOC RE2 OPENCL)
 elseif(APPLE)
 elseif(APPLE)
 endif()

@@ -25,10 +25,10 @@ void* operator new(std::size_t size, std::align_val_t alignment, const std::noth
     return cppgpt::allocate(size, static_cast<std::size_t>(alignment));
 }
 
-void* operator new(std::size_t /*size*/, void* ptr) noexcept
-{
-    return ptr;
-}
+//void* operator new(std::size_t /*size*/, void* ptr) noexcept
+//{
+//    return ptr;
+//}
 
 void operator delete(void* ptr) noexcept
 {
@@ -60,10 +60,10 @@ void operator delete(void* ptr, std::align_val_t alignment, const std::nothrow_t
     cppgpt::deallocate(ptr, static_cast<std::size_t>(alignment));
 }
 
-void operator delete(void* ptr, void*) noexcept
-{
-    (void)ptr;
-}
+//void operator delete(void* ptr, void*) noexcept
+//{
+//    (void)ptr;
+//}
 
 void* operator new[](std::size_t size)
 {
@@ -85,10 +85,10 @@ void* operator new[](std::size_t size, std::align_val_t alignment, const std::no
     return cppgpt::allocate(size, static_cast<std::size_t>(alignment));
 }
 
-void* operator new[](std::size_t /*size*/, void* ptr) noexcept
-{
-    return ptr;
-}
+//void* operator new[](std::size_t /*size*/, void* ptr) noexcept
+//{
+//    return ptr;
+//}
 
 void operator delete[](void* ptr) noexcept
 {
@@ -120,10 +120,10 @@ void operator delete[](void* ptr, std::align_val_t alignment, const std::nothrow
     cppgpt::deallocate(ptr, static_cast<std::size_t>(alignment));
 }
 
-void operator delete[](void* ptr, void*) noexcept
-{
-    (void)ptr;
-}
+//void operator delete[](void* ptr, void*) noexcept
+//{
+//    (void)ptr;
+//}
 
 namespace cppgpt
 {
@@ -787,7 +787,6 @@ namespace util
         f32* dstf = static_cast<f32*>(dst);
         const s16* srcs16 = static_cast<const s16*>(src);
         u64 qsize = (size >> 2) << 2;
-        u64 remain = size - qsize;
         __declspec(align(16)) f32 result[4];
         for(u64 i = 0; i < qsize; i += 4) {
             __m128i x = _mm_loadl_epi64((__m128i*)&srcs16[i]);
@@ -829,6 +828,31 @@ void* allocate(size_t size, size_t align)
 void deallocate(void* ptr, size_t align)
 {
     mi_free_aligned(ptr, align);
+}
+
+u32 next_prime(u32 x)
+{
+    // clang-format off
+    static constexpr u32 table[] = {
+        5UL, 11UL, 17UL, 29UL, 37UL,
+        53UL, 67UL, 79UL, 97UL, 131UL,
+        193UL, 257UL, 389UL, 521UL, 769UL,
+        1031UL, 1543UL, 2053UL, 3079UL, 6151UL,
+        12289UL, 24593UL, 49157UL, 98317UL, 196613UL,
+        393241UL, 786433UL, 1572869UL, 3145739UL, 6291469UL,
+        12582917UL, 25165843UL, 50331653UL, 100663319UL, 201326611UL,
+        402653189UL, 805306457UL, 1610612741UL, 3221225473UL, 4294967291UL,
+    };
+    static constexpr u32 size = sizeof(table)/sizeof(table[0]);
+    // clang-format on
+
+    const u32* const prime_list_begin = table;
+    const u32* const prime_list_end = prime_list_begin + size;
+    const u32* bound = lower_bound(prime_list_begin, prime_list_end, x);
+    if(bound == prime_list_end) {
+        --bound;
+    }
+    return *bound;
 }
 
 //--- Timer
@@ -1034,10 +1058,10 @@ Tensor::Tensor(ggml_type type, std::initializer_list<u64> dimensions)
     data_ = std::unique_ptr<u8[], CustomDeleter>(new u8[total_in_bytes], CustomDeleter(false));
 }
 
-Tensor::Tensor(ggml_type type, std::initializer_list<u64> dimensions, void* data)
+Tensor::Tensor(ggml_type type, std::initializer_list<u64> dimensions, const void* data)
     : type_(type)
     , num_dims_(static_cast<u16>(dimensions.size()))
-    , data_(static_cast<u8*>(data), CustomDeleter(true))
+    , data_(static_cast<u8*>(const_cast<void*>(data)), CustomDeleter(true))
     , bit_packed_(1)
 {
     assert(0 < num_dims_ && num_dims_ <= GGML_MAX_DIMS);
@@ -1066,10 +1090,10 @@ Tensor::Tensor(ggml_type type, const Tensor& shape)
     data_ = std::unique_ptr<u8[], CustomDeleter>(new u8[total_in_bytes], CustomDeleter(false));
 }
 
-Tensor::Tensor(ggml_type type, const Tensor& shape, void* data)
+Tensor::Tensor(ggml_type type, const Tensor& shape, const void* data)
     : type_(type)
     , num_dims_(static_cast<u16>(shape.num_dims()))
-    , data_(static_cast<u8*>(data), CustomDeleter(true))
+    , data_(static_cast<u8*>(const_cast<void*>(data)), CustomDeleter(true))
     , bit_packed_(1)
 {
     assert(0 < num_dims_ && num_dims_ <= GGML_MAX_DIMS);
@@ -1174,11 +1198,11 @@ bool is_same_shape(const Tensor& x0, const Tensor& x1)
 
 namespace op
 {
-    Tensor&& convertF32(const Tensor& input)
+    Tensor convertF32(const Tensor& input)
     {
         if(ggml_type::GGML_TYPE_F32 == input.type()){
             Tensor result(ggml_type::GGML_TYPE_F32, input, input.data<void>());
-            return std::move(result);
+            return result;
         }
         u64 size = input.total_size();
         Tensor result(ggml_type::GGML_TYPE_F32, input);
@@ -1187,7 +1211,6 @@ namespace op
             util::copyf32_f(size, result.data<void>(), input.data<void>());
             break;
         case ggml_type::GGML_TYPE_F16:{
-                Tensor result(ggml_type::GGML_TYPE_F32, input);
             util::copyf16_f(size, result.data<void>(), input.data<void>());
             }
             break;
@@ -1299,7 +1322,7 @@ namespace op
             assert(false);
             break;
         }
-        return std::move(result);
+        return result;
     }
 
     f32 dot_product(u64 size, const f32* x0, const f32* x1)
@@ -1434,7 +1457,7 @@ namespace op
         }
     }
 
-    Tensor&& normalize(const Tensor& input, const Tensor& weight, const Tensor& bias)
+    Tensor normalize(const Tensor& input, const Tensor& weight, const Tensor& bias)
     {
         assert(ggml_type::GGML_TYPE_F32 == input.type());
 
@@ -1455,7 +1478,7 @@ namespace op
         return std::move(result);
     }
 
-    Tensor&& embed_tokens(const Tensor& emb_weight, const Tensor& tokens)
+    Tensor embed_tokens(const Tensor& emb_weight, const Tensor& tokens)
     {
         assert(ggml_type::GGML_TYPE_I32 == tokens.type());
         const u64 d_embed = emb_weight.size(1);
@@ -1463,16 +1486,16 @@ namespace op
         Tensor result(ggml_type::GGML_TYPE_F32, {total_size, d_embed});
         for(u64 i = 0; i < total_size; ++i) {
             const s32 emb_index = tokens.data<s32>()[i];
-            const s32 emb_offset = emb_index * d_embed;
-            const s32 out_offset = i * d_embed;
+            const u64 emb_offset = emb_index * d_embed;
+            const u64 out_offset = i * d_embed;
             const f32* src = emb_weight.data<f32>() + emb_offset;
             f32* dst = result.data<f32>() + out_offset;
             ::memcpy(dst, src, sizeof(f32) * d_embed);
         }
-        return std::move(result);
+        return result;
     }
 
-    Tensor&& embed_projection(const Tensor& input, const Tensor& emb_weight)
+    Tensor embed_projection(const Tensor& input, const Tensor& emb_weight)
     {
         const u64 n_ctx = input.size(0);
         const u64 n_vocab = emb_weight.size(0);
@@ -1484,9 +1507,10 @@ namespace op
             const f32* emb = emb_weight.data<f32>() + i * n_embed;
             result.data<f32>()[i] = dot_product(n_embed, input.data<f32>() + offset, emb);
         }
+        return result;
     }
 
-    Tensor&& gelu(const Tensor& input)
+    Tensor gelu(const Tensor& input)
     {
         assert(ggml_type::GGML_TYPE_F32 == input.type());
         const u64 n_vectors = input.size(0);
@@ -1500,7 +1524,7 @@ namespace op
                                           * (x + 0.044715f * std::pow(x, 3.0f))));
             result.data<f32>()[i] = res;
         }
-        return std::move(result);
+        return result;
     }
 
     void vec_add(u64 size, f32* dst, const f32* src0, const f32* src1)
@@ -1519,7 +1543,7 @@ namespace op
         }
     }
 
-    Tensor&& add(const Tensor& x0, const Tensor& x1)
+    Tensor add(const Tensor& x0, const Tensor& x1)
     {
         assert(ggml_type::GGML_TYPE_F32 == x0.type());
         assert(ggml_type::GGML_TYPE_F32 == x1.type());
@@ -1534,10 +1558,10 @@ namespace op
             f32* dst = result.data<f32>() + offset;
             vec_add(ncols, dst, row0, row1);
         }
-        return std::move(result);
+        return result;
     }
 
-    Tensor&& affine_proj_2d(const Tensor& input, const Tensor& weight, const Tensor& bias)
+    Tensor affine_proj_2d(const Tensor& input, const Tensor& weight, const Tensor& bias)
     {
         const u64 nrows0 = input.size(0);
         const u64 ncols = input.size(1);
@@ -1553,10 +1577,10 @@ namespace op
                 result.data<f32>()[r0 * nrows1 + r1] = a + b;
             }
         }
-        return std::move(result);
+        return result;
     }
 
-    Tensor&& qk_masked_attn_matmul(
+    Tensor qk_masked_attn_matmul(
         const Tensor& q,
         const Tensor& k,
         const u64 n_heads)
@@ -1565,7 +1589,7 @@ namespace op
         const u64 ncols = q.size(1);
         const u64 k_nrows = k.size(0);
         const u64 d_head = ncols / n_heads;
-        const f32 scale_factor = 1.0f / ::sqrtf(d_head);
+        const f32 scale_factor = 1.0f / ::sqrtf(static_cast<f32>(d_head));
 
         Tensor result(ggml_type::GGML_TYPE_F32, {n_heads, q_nrows, q_nrows});
         for(u64 h = 0; h < n_heads; ++h) {
@@ -1593,7 +1617,7 @@ namespace op
                 }
             }
         }
-        return std::move(result);
+        return result;
     }
 
     void qk_softmax(Tensor& qk, u64 n_heads)
@@ -1679,13 +1703,31 @@ LayerNorm::~LayerNorm()
 {
 }
 
-Tensor&& LayerNorm::forward(const Tensor& input)
+LayerNorm::LayerNorm(LayerNorm&& other)
+    : duration_(0)
+    , weight_(std::move(other.weight_))
+    , bias_(std::move(other.bias_))
+{
+}
+
+LayerNorm& LayerNorm::operator=(LayerNorm&& other)
+{
+    if(this != &other) {
+        duration_ = 0;
+        weight_ = std::move(other.weight_);
+        bias_ = std::move(bias_);
+    }
+    return *this;
+}
+
+Tensor LayerNorm::forward(const Tensor& input)
 {
     assert(weight_.size(0) == input.size(1));
     Timer timer(duration_);
-    const u32 d_embed = weight_.size(0);
 
-    return std::move(op::normalize(input, weight_, bias_));
+    Tensor weight = op::convertF32(weight_);
+    Tensor bias = op::convertF32(bias_);
+    return op::normalize(input, weight, bias);
 }
 
 //--- Embedding
@@ -1709,20 +1751,37 @@ Embedding::~Embedding()
 {
 }
 
-Tensor&& Embedding::forward(const Tensor& input)
+Embedding::Embedding(Embedding&& other)
+    : duration_(0)
+    , weight_(std::move(other.weight_))
+{
+}
+
+Embedding& Embedding::operator=(Embedding&& other)
+{
+    if(this != &other) {
+        duration_ = 0;
+        weight_ = std::move(other.weight_);
+    }
+    return *this;
+}
+
+Tensor Embedding::forward(const Tensor& input)
 {
     assert(ggml_type::GGML_TYPE_I32 == input.type());
     assert(input.num_dims() == 1);
     Timer timer(duration_);
-    return std::move(op::embed_tokens(input, weight_));
+    Tensor weight = op::convertF32(weight_);
+    return op::embed_tokens(input, weight);
 }
 
-Tensor&& Embedding::forward_proj(const Tensor& input)
+Tensor Embedding::forward_proj(const Tensor& input)
 {
     assert(input.num_dims() == 2);
     assert(weight_.size(1) == input.size(1));
     Timer timer(duration_);
-    return std::move(op::embed_projection(input, weight_));
+    Tensor weight = op::convertF32(weight_);
+    return op::embed_projection(input, weight);
 }
 
 //--- PositionalEmbedding
@@ -1746,19 +1805,34 @@ PositionalEmbedding::~PositionalEmbedding()
 {
 }
 
-Tensor&& PositionalEmbedding::forward(u64 num_context)
+PositionalEmbedding::PositionalEmbedding(PositionalEmbedding&& other)
+    : duration_(0)
+    , weight_(std::move(other.weight_))
+{
+}
+
+PositionalEmbedding& PositionalEmbedding::operator=(PositionalEmbedding&& other)
+{
+    if(this != &other) {
+        duration_ = 0;
+        weight_ = std::move(other.weight_);
+    }
+    return *this;
+}
+
+Tensor PositionalEmbedding::forward(u64 num_context)
 {
     assert(num_context <= weight_.size(0));
     Timer timer(duration_);
-    Tensor weightf = std::move(op::convertF32(weight_));
+    Tensor weight = op::convertF32(weight_);
     Tensor result(ggml_type::GGML_TYPE_F32, {num_context, weight_.size(1)});
     for(u64 i = 0; i < num_context; ++i) {
         u64 offset = i * weight_.size(1);
-        const f32* src = weightf.data<f32>() + offset;
+        const f32* src = weight.data<f32>() + offset;
         f32* dst = result.data<f32>() + offset;
         ::memcpy(dst, src, sizeof(f32) * weight_.size(1));
     }
-    return std::move(result);
+    return result;
 }
 
 //--- GELU
@@ -1772,10 +1846,21 @@ GELU::~GELU()
 {
 }
 
-Tensor&& GELU::forward(const Tensor& input)
+GELU::GELU(GELU&& /*other*/)
+    : duration_(0)
+{
+}
+
+GELU& GELU::operator=(GELU&& /*other*/)
+{
+    duration_ = 0;
+    return *this;
+}
+
+Tensor GELU::forward(const Tensor& input)
 {
     Timer timer(duration_);
-    return std::move(op::gelu(input));
+    return op::gelu(input);
 }
 
 //--- Residual
@@ -1789,14 +1874,25 @@ Residual::~Residual()
 {
 }
 
-Tensor&& Residual::forward(const Tensor& input0, const Tensor& input1)
+Residual::Residual(Residual&& /*other*/)
+    : duration_(0)
+{
+}
+
+Residual& Residual::operator=(Residual&& /*other*/)
+{
+    duration_ = 0;
+    return *this;
+}
+
+Tensor Residual::forward(const Tensor& input0, const Tensor& input1)
 {
     assert(input0.type() == input1.type());
     assert(input0.num_dims() == 2);
     assert(input1.num_dims() == 2);
     assert(is_same_shape(input0, input1));
     Timer timer(duration_);
-    return std::move(op::add(input0, input1));
+    return op::add(input0, input1);
 }
 
 //--- Linear
@@ -1817,12 +1913,31 @@ Linear::~Linear()
 {
 }
 
-Tensor&& Linear::forward(const Tensor& input)
+Linear::Linear(Linear&& other)
+    : duration_(0)
+    , weight_(std::move(other.weight_))
+    , bias_(std::move(other.bias_))
+{
+}
+
+Linear& Linear::operator=(Linear&& other)
+{
+    if(this != &other) {
+        duration_ = 0;
+        weight_ = std::move(other.weight_);
+        bias_ = std::move(other.bias_);
+    }
+    return *this;
+}
+
+Tensor Linear::forward(const Tensor& input)
 {
     assert(2 == input.num_dims());
     assert(input.size(1) == weight_.size(1));
     Timer timer(duration_);
-    return std::move(op::affine_proj_2d(input, weight_, bias_));
+    Tensor weight = op::convertF32(weight_);
+    Tensor bias = op::convertF32(bias_);
+    return op::affine_proj_2d(input, weight, bias);
 }
 
 //--- MultiHeadSelfAttn
@@ -1854,7 +1969,36 @@ MultiHeadSelfAttn::MultiHeadSelfAttn(
 {
 }
 
-Tensor&& MultiHeadSelfAttn::forward(const Tensor& input)
+MultiHeadSelfAttn::~MultiHeadSelfAttn()
+{
+}
+
+MultiHeadSelfAttn::MultiHeadSelfAttn(MultiHeadSelfAttn&& other)
+    : duration_(0)
+    , n_heads_(other.n_heads_)
+    , query_(std::move(other.query_))
+    , key_(std::move(other.key_))
+    , value_(std::move(other.value_))
+    , qkv_proj_(std::move(other.qkv_proj_))
+{
+}
+
+MultiHeadSelfAttn& MultiHeadSelfAttn::operator=(MultiHeadSelfAttn&& other)
+{
+    if(this != &other){
+    duration_ = 0;
+    n_heads_ = other.n_heads_;
+    query_ = std::move(other.query_);
+    key_ = std::move(other.key_);
+    value_ = std::move(other.value_);
+    qkv_proj_ = std::move(other.qkv_proj_);
+
+    other.n_heads_ = 0;
+    }
+    return *this;
+}
+
+Tensor MultiHeadSelfAttn::forward(const Tensor& input)
 {
     assert(2 == input.num_dims());
     Timer timer(duration_);
@@ -1865,10 +2009,10 @@ Tensor&& MultiHeadSelfAttn::forward(const Tensor& input)
 
     Tensor qkv = masked_qkv_attn(q, k, v);
     Tensor out = qkv_proj_.forward(qkv);
-    return std::move(out);
+    return out;
 }
 
-Tensor&& MultiHeadSelfAttn::masked_qkv_attn(const Tensor& q, const Tensor& k, const Tensor& v)
+Tensor MultiHeadSelfAttn::masked_qkv_attn(const Tensor& q, const Tensor& k, const Tensor& v)
 {
     const u64 n_ctx = q.size(0);
     const u64 d_embed = q.size(1);
@@ -1878,7 +2022,7 @@ Tensor&& MultiHeadSelfAttn::masked_qkv_attn(const Tensor& q, const Tensor& k, co
     op::qk_softmax(qk, n_heads_);
     op::qkv_attn_matmul(qkv, v, qk, n_heads_);
 
-    return std::move(qkv);
+    return qkv;
 }
 
 //--- ResidualAttnBlock
@@ -1900,13 +2044,51 @@ ResidualAttnBlock::ResidualAttnBlock()
 //{
 //}
 
-Tensor&& ResidualAttnBlock::forward(const Tensor& input)
+ResidualAttnBlock::~ResidualAttnBlock()
+{
+}
+
+ResidualAttnBlock::ResidualAttnBlock(ResidualAttnBlock&& other)
+    : duration_(0)
+    , attn_ln_(std::move(other.attn_ln_))
+    , attn_(std::move(other.attn_))
+    , inp_res_(std::move(other.inp_res_))
+    , mlp_ln_(std::move(other.mlp_ln_))
+    , mlp_fc_(std::move(other.mlp_fc_))
+    , gelu_(std::move(other.gelu_))
+    , mlp_proj_(std::move(other.mlp_proj_))
+    , attn_res_(std::move(other.attn_res_))
+{
+}
+
+ResidualAttnBlock& ResidualAttnBlock::operator=(ResidualAttnBlock&& other)
+{
+    if(this != &other) {
+        duration_ = 0;
+        attn_ln_ = std::move(other.attn_ln_);
+        attn_ = std::move(other.attn_);
+        inp_res_ = std::move(other.inp_res_);
+        mlp_ln_ = std::move(other.mlp_ln_);
+        mlp_fc_ = std::move(other.mlp_fc_);
+        gelu_ = std::move(other.gelu_);
+        mlp_proj_ = std::move(other.mlp_proj_);
+        attn_res_ = std::move(other.attn_res_);
+    }
+    return *this;
+}
+
+Tensor ResidualAttnBlock::forward(const Tensor& input)
 {
     Timer timer(duration_);
-    Tensor attn_out = inp_res.forward(inp, attn.forward(attn_ln.forward(inp)));
-    Tensor out = attn_res.forward(attn_out,
-        mlp_proj.forward(gelu.forward(mlp_fc.forward(mlp_ln.forward(attn_out)))));
-    return out;
+    Tensor attn_ln_out = attn_ln_.forward(input);
+    Tensor attn_out = attn_.forward(attn_ln_out);
+    Tensor inp_res_out = inp_res_.forward(input, attn_out);
+    Tensor mlp_ln_out = mlp_ln_.forward(inp_res_out);
+    Tensor mlp_fc_out = mlp_fc_.forward(mlp_ln_out);
+    Tensor gelu_out = gelu_.forward(mlp_fc_out);
+    Tensor mlp_proj_out = mlp_proj_.forward(gelu_out);
+    Tensor result = attn_res_.forward(inp_res_out, mlp_proj_out);
+    return result;
 }
 
 //--- RMSNorm

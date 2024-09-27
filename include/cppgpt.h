@@ -4,35 +4,38 @@
 #include <cassert>
 #include <chrono>
 #include <cstdint>
+#include <type_traits>
 #include <initializer_list>
 #include <memory>
+#include <utility>
+#include <re2/re2.h>
 
 // new/delete
 void* operator new(std::size_t size);
 void* operator new(std::size_t size, std::align_val_t alignment);
 void* operator new(std::size_t size, const std::nothrow_t&) noexcept;
 void* operator new(std::size_t size, std::align_val_t alignment, const std::nothrow_t&) noexcept;
-void* operator new(std::size_t size, void* ptr) noexcept;
+//void* operator new(std::size_t size, void* ptr) noexcept;
 void operator delete(void* ptr) noexcept;
 void operator delete(void* ptr, std::size_t size) noexcept;
 void operator delete(void* ptr, std::align_val_t alignment) noexcept;
 void operator delete(void* ptr, std::size_t size, std::align_val_t alignment) noexcept;
 void operator delete(void* ptr, const std::nothrow_t&) noexcept;
 void operator delete(void* ptr, std::align_val_t alignment, const std::nothrow_t&) noexcept;
-void operator delete(void* ptr, void*) noexcept;
+//void operator delete(void* ptr, void*) noexcept;
 
 void* operator new[](std::size_t size);
 void* operator new[](std::size_t size, std::align_val_t alignment);
 void* operator new[](std::size_t size, const std::nothrow_t&) noexcept;
 void* operator new[](std::size_t size, std::align_val_t alignment, const std::nothrow_t&) noexcept;
-void* operator new[](std::size_t size, void* ptr) noexcept;
+//void* operator new[](std::size_t size, void* ptr) noexcept;
 void operator delete[](void* ptr) noexcept;
 void operator delete[](void* ptr, std::size_t size) noexcept;
 void operator delete[](void* ptr, std::align_val_t alignment) noexcept;
 void operator delete[](void* ptr, std::size_t size, std::align_val_t alignment) noexcept;
 void operator delete[](void* ptr, const std::nothrow_t&) noexcept;
 void operator delete[](void* ptr, std::align_val_t alignment, const std::nothrow_t&) noexcept;
-void operator delete[](void* ptr, void*) noexcept;
+//void operator delete[](void* ptr, void*) noexcept;
 
 namespace cppgpt
 {
@@ -58,6 +61,305 @@ static constexpr u32 GGML_MAX_OP_PARAMS = 64;
 
 void* allocate(size_t size, size_t align = 16);
 void deallocate(void* ptr, size_t align = 16);
+u32 next_prime(u32 x);
+
+/**
+@brief Find the first element in the range [first, last) which is more than equal val.
+*/
+template<class FwdIt, class T, class LessThan>
+FwdIt lower_bound(FwdIt first, FwdIt last, const T& val, LessThan LT)
+{
+    typename std::iterator_traits<FwdIt>::difference_type count = last - first;
+    while(0 < count) {
+        typename std::iterator_traits<FwdIt>::difference_type d = count / 2;
+        FwdIt m = first + d;
+        if(LT(*m, val)) {
+            first = m + 1;
+            count -= d + 1;
+        } else {
+            count = d;
+        }
+    }
+    return first;
+}
+
+template<class T>
+struct Hasher
+{
+    u32 operator()(const T& x) const;
+};
+
+template<class T, class U>
+class HashMap
+{
+    static_assert(std::is_trivially_copyable<T>::value == true, "T should be trivially copyable");
+    static_assert(std::is_trivially_copyable<U>::value == true, "U should be trivially copyable");
+public:
+    inline static constexpr u32 Invalid = 0xFFFF'FFFFUL;
+
+    HashMap();
+    ~HashMap();
+    u32 size() const;
+    void clear();
+    void add(const T& key, const U& value);
+    void remove(const T& key);
+    void remove(u32 pos);
+    u32 find(const T& key) const;
+    u32 end() const;
+    void swap(HashMap& other);
+private:
+    HashMap(const HashMap&) = delete;
+    HashMap& operator=(const HashMap&) = delete;
+
+    inline static u64 align(u64 x)
+    {
+        return (x+7ULL)&(~7ULL);
+    }
+
+    explicit HashMap(u32 capacity);
+    void expand();
+    void create(u32 capacity);
+    u32 find(const T& key, u32 hash) const;
+    void remove(u32 pos, u32 hash);
+
+    struct Entry
+    {
+        inline static constexpr u32 HashMask = 0x7FFFFFFFU;
+        inline static constexpr u32 OccupyFlag = 0x80000000U;
+
+        void clear()
+        {
+            hash_ = 0;
+        }
+        bool isOccupy() const
+        {
+            return 0 != (hash_ & OccupyFlag);
+        }
+        void setOccupy()
+        {
+            hash_ |= OccupyFlag;
+        }
+        void setEmpty()
+        {
+            hash_ &= HashMask;
+        }
+
+        u32 index_;
+        u32 next_;
+        u32 hash_;
+    };
+
+    u32 capacity_;
+    u32 size_;
+    u32 empty_;
+    Hasher<T> hasher_;
+    Entry* entries_;
+    T* keys_;
+    U* values_;
+};
+
+template<class T, class U>
+HashMap<T, U>::HashMap()
+    : capacity_(0)
+    , size_(0)
+    , empty_(Invalid)
+    , entries_(nullptr)
+    , keys_(nullptr)
+    , values_(nullptr)
+{
+}
+
+template<class T, class U>
+HashMap<T, U>::~HashMap()
+{
+    clear();
+    deallocate(entries_);
+    capacity_ = 0;
+    entries_ = nullptr;
+    keys_ = nullptr;
+    values_ = nullptr;
+}
+
+template<class T, class U>
+u32 HashMap<T, U>::size() const
+{
+    return size_;
+}
+
+template<class T, class U>
+void HashMap<T, U>::clear()
+{
+    for(u32 i=0; i<capacity_; ++i){
+        if(entries_[i].isOccupy()){
+            keys_[i].~T();
+            values_[i].~U();
+            entries_[i].hash_ = 0;
+            entries_[i].index_ = Invalid;
+            entries_[i].next_ = empty_;
+            empty_ = i;
+        }
+    }
+    size_ = 0;
+}
+
+template<class T, class U>
+void HashMap<T, U>::add(const T& key, const U& value)
+{
+    u32 hash = hasher_(key);
+    if(0 < capacity_ && find(key, hash) != end()) {
+        return;
+    }
+
+    if(empty_ == Invalid) {
+        expand();
+        assert(Invalid != empty_);
+    }
+    u32 pos = empty_;
+    empty_ = entries_[empty_].next_;
+
+    u32 entryPos = hash % capacity_;
+    entries_[pos].next_ = entries_[entryPos].index_;
+    entries_[entryPos].index_ = pos;
+    entries_[pos].hash_ = hash | Entry::OccupyFlag;
+    new(&keys_[pos]) T(key);
+    new(&values_[pos]) U(value);
+    ++size_;
+}
+
+template<class T, class U>
+void HashMap<T, U>::remove(const T& key)
+{
+    if(capacity_ <= 0) {
+        return;
+    }
+    u32 hash = hasher_(key);
+    u32 pos = find(key, hash);
+    if(end() == pos || !entries_[pos].isOccupy()) {
+        return;
+    }
+    remove(pos, hash);
+}
+
+template<class T, class U>
+void HashMap<T, U>::remove(u32 pos)
+{
+    if(capacity_ <= 0) {
+        return;
+    }
+    if(end() == pos || !entries_[pos].isOccupy()) {
+        return;
+    }
+    u32 hash = hasher_(key);
+    remove(pos, hash);
+}
+
+template<class T, class U>
+u32 HashMap<T, U>::find(const T& key) const
+{
+}
+
+template<class T, class U>
+u32 HashMap<T, U>::end() const
+{
+}
+
+template<class T, class U>
+void HashMap<T, U>::swap(HashMap& other)
+{
+}
+
+template<class T, class U>
+HashMap<T, U>::HashMap(u32 capacity)
+    :capacity_(0)
+    ,size_(0)
+    ,empty_(Invalid)
+    ,entries_(nullptr)
+    ,keys_(nullptr)
+    ,values_(nullptr)
+{
+    create(capacity);
+}
+
+template<class T, class U>
+void HashMap<T, U>::expand()
+{
+    HashMap<T,U> tmp(capacity_+1);
+
+    for(u32 i = 0; i < capacity_; ++i) {
+        if(entries_[i].isOccupy()) {
+            tmp.add(keys_[i], values_[i]);
+        }
+    }
+    tmp.swap(*this);
+}
+
+template<class T, class U>
+void HashMap<T, U>::create(u32 capacity)
+{
+    capacity_ = next_prime(capacity);
+    u64 entry_size = align(sizeof(Entry)*capacity_);
+    u64 key_size = align(sizeof(T)*capacity_);
+    u64 value_size = align(sizeof(U)*capacity_);
+    u8* buffer = static_cast<u8*>(allocate(entry_size + key_size + value_size));
+    Entry* entries = reinterpret_cast<Entry*>(buffer);
+    T* keys = reinterpret_cast<T*>(buffer + entry_size);
+    U* values = reinterpret_cast<U*>(buffer + entry_size + key_size);
+    for(u32 i=0; i<capacity_; ++i){
+        entries[i].index_ = Invalid;
+        entries[i].next_ = i+1;
+        entries[i].hash_ = 0;
+    }
+    entries[capacity_-1].next_ = Invalid;
+    empty_ = 0;
+    deallocate(entries_);
+    entries_ = entries;
+    keys_ = keys;
+    values_ = values;
+}
+
+template<class T, class U>
+u32 HashMap<T, U>::find(const T& key, u32 hash) const
+{
+    assert(0<capacity_);
+    u32 pos = hash % capacity_;
+    hash |= Entry::OccupyFlag;
+    do{
+        if(!entries_[pos].isOccupy()){
+            break;
+        }
+        if(hash == entries_[pos].hash_ && key==keys_[pos]){
+            return i;
+        }
+        pos = entries_[pos].next_;
+    }while(pos != Invalid);
+    return end();
+}
+
+template<class T, class U>
+void HashMap<T,U>::remove(u32 pos, u32 hash)
+{
+    u32 entryPos = hash % capacity_;
+
+    keys_[pos].~T();
+    values_[pos].~U();
+
+    if(pos == entries_[entryPos].index_) {
+        entries_[entryPos].index_ = entries_[pos].next_;
+    } else {
+        for(u32 p = entries_[entryPos].index_; entries_[p].next_ != pos; p = entries_[p].next_) {
+#if _DEBUG
+            if(buckets_[p].next_ == Invalid) {
+                assert(false);
+            }
+#endif
+        }
+        buckets_[p].next_ = buckets_[pos].next_;
+    }
+    buckets_[pos].next_ = freeList_;
+    freeList_ = pos;
+    buckets_[pos].clear();
+    --size_;
+}
 
 // available tensor operations
 enum class ggml_op
@@ -238,9 +540,9 @@ class Tensor
 public:
     Tensor();
     Tensor(ggml_type type, std::initializer_list<u64> dimensions);
-    Tensor(ggml_type type, std::initializer_list<u64> dimensions, void* data);
+    Tensor(ggml_type type, std::initializer_list<u64> dimensions, const void* data);
     Tensor(ggml_type type, const Tensor& shape);
-    Tensor(ggml_type type, const Tensor& shape, void* data);
+    Tensor(ggml_type type, const Tensor& shape, const void* data);
     Tensor(Tensor&& other);
     ~Tensor();
     Tensor& operator=(Tensor&& other);
@@ -295,17 +597,17 @@ private:
 
 namespace op
 {
-    Tensor&& convertF32(const Tensor& input);
+    Tensor convertF32(const Tensor& input);
     f32 kahan_sum(u64 size, const f32* src);
     f32 kahan_sum_squared(u64 size, const f32* src, f32 mean);
     void normalize_vec(u64 size, f32* dst, const f32* src, const f32* weight, const f32* bias);
-    Tensor&& normalize(const Tensor& input, const Tensor& weight, const Tensor& bias);
-    Tensor&& embed_tokens(const Tensor& emb_weight, const Tensor& tokens);
-    Tensor&& embed_projection(const Tensor& input, const Tensor& emb_weight);
-    Tensor&& gelu(const Tensor& input);
+    Tensor normalize(const Tensor& input, const Tensor& weight, const Tensor& bias);
+    Tensor embed_tokens(const Tensor& emb_weight, const Tensor& tokens);
+    Tensor embed_projection(const Tensor& input, const Tensor& emb_weight);
+    Tensor gelu(const Tensor& input);
     void vec_add(u64 size, f32* dst, const f32* src0, const f32* src1);
-    Tensor&& add(const Tensor& x0, const Tensor& x1);
-    Tensor&& affine_proj_2d(const Tensor& input, const Tensor& weight, const Tensor& bias);
+    Tensor add(const Tensor& x0, const Tensor& x1);
+    Tensor affine_proj_2d(const Tensor& input, const Tensor& weight, const Tensor& bias);
 } // namespace op
 
 bool is_same_shape(const Tensor& x0, const Tensor& x1);
@@ -323,7 +625,10 @@ public:
         void* weight,
         void* bias);
     ~LayerNorm();
-    Tensor&& forward(const Tensor& input);
+    LayerNorm(LayerNorm&& other);
+    LayerNorm& operator=(LayerNorm&& other);
+
+    Tensor forward(const Tensor& input);
 
     inline s64 time() const{ return duration_;}
 private:
@@ -344,8 +649,11 @@ public:
         u32 d_embed,
         void* weight);
     ~Embedding();
-    Tensor&& forward(const Tensor& input);
-    Tensor&& forward_proj(const Tensor& input);
+    Embedding(Embedding&& other);
+    Embedding& operator=(Embedding&& other);
+
+    Tensor forward(const Tensor& input);
+    Tensor forward_proj(const Tensor& input);
 
     inline s64 time() const{ return duration_;}
 private:
@@ -365,7 +673,10 @@ public:
         u64 d_embed,
         void* weight);
     ~PositionalEmbedding();
-    Tensor&& forward(u64 num_context);
+    PositionalEmbedding(PositionalEmbedding&& other);
+    PositionalEmbedding& operator=(PositionalEmbedding&& other);
+
+    Tensor forward(u64 num_context);
 
     inline s64 time() const{ return duration_;}
 private:
@@ -380,7 +691,10 @@ class GELU
 public:
     GELU();
     ~GELU();
-    Tensor&& forward(const Tensor& input);
+    GELU(GELU&& other);
+    GELU& operator=(GELU&& other);
+
+    Tensor forward(const Tensor& input);
 
     inline s64 time() const{ return duration_;}
 private:
@@ -394,7 +708,10 @@ class Residual
 public:
     Residual();
     ~Residual();
-    Tensor&& forward(const Tensor& input0, const Tensor& input1);
+    Residual(Residual&& other);
+    Residual& operator=(Residual&& other);
+
+    Tensor forward(const Tensor& input0, const Tensor& input1);
 
     inline s64 time() const{ return duration_;}
 private:
@@ -409,8 +726,10 @@ public:
     Linear();
     Linear(ggml_type type, u64 d_in, u64 d_out, void* weight, void* bias);
     ~Linear();
+    Linear(Linear&& other);
+    Linear& operator=(Linear&& other);
 
-    Tensor&& forward(const Tensor& input);
+    Tensor forward(const Tensor& input);
 
     inline s64 time() const{ return duration_;}
 private:
@@ -437,11 +756,15 @@ public:
         void* value_b,
         void* qkv_proj_w,
         void* qkv_proj_b);
-    Tensor&& forward(const Tensor& input);
+    ~MultiHeadSelfAttn();
+    MultiHeadSelfAttn(MultiHeadSelfAttn&& other);
+    MultiHeadSelfAttn& operator=(MultiHeadSelfAttn&& other);
+
+    Tensor forward(const Tensor& input);
 
     inline s64 time() const{ return duration_;}
 private:
-    Tensor&& masked_qkv_attn(const Tensor& q, const Tensor& k, const Tensor& v);
+    Tensor masked_qkv_attn(const Tensor& q, const Tensor& k, const Tensor& v);
 
     s64 duration_;
     u64 n_heads_;
@@ -455,12 +778,11 @@ class ResidualAttnBlock
 {
 public:
     ResidualAttnBlock();
-    //ResidualAttnBlock(
-    //    ggml_type type,
-    //    u64 n_attn_heads,
-    //    u64 d_embed,
-    //    u64 d_mlp);
-    Tensor&& forward(const Tensor& input);
+    ~ResidualAttnBlock();
+    ResidualAttnBlock(ResidualAttnBlock&& other);
+    ResidualAttnBlock& operator=(ResidualAttnBlock&& other);
+
+    Tensor forward(const Tensor& input);
     inline s64 time() const
     {
         return duration_;
@@ -492,6 +814,8 @@ private:
     Tensor weight_;
 };
 
+//--- Tokenizer
+//-----------------------------------------------------------
 //--- Model
 //-----------------------------------------------------------
 class Model
