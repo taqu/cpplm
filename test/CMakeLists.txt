@@ -13,6 +13,7 @@ set(HEADERS "catch_amalgamated.hpp")
 set(SOURCES
     ${SOURCE_DIR}/catch_amalgamated.cpp
     ${SOURCE_DIR}/test_gguf.cpp
+    ${SOURCE_DIR}/test_hash.cpp
     ${SOURCE_DIR}/main.cpp)
 
 include_directories(AFTER ${CMAKE_CURRENT_SOURCE_DIR})

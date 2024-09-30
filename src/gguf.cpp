@@ -267,11 +267,141 @@ std::tuple<uint64_t, uint8_t*> read(const char8_t* filepath)
 }
 
 //------------------------------------------------------------
+bool operator==(const gguf_metadata_kv_t& x0, const gguf_metadata_kv_t& x1)
+{
+    if(x0.hash_ != x1.hash_) {
+        return false;
+    }
+    if(x0.key_.length_ != x1.key_.length_ || x0.key_.offset_ != x1.key_.offset_) {
+        return false;
+    }
+    if(x0.value_type_ != x1.value_type_) {
+        return false;
+    }
+    switch(x0.value_type_) {
+    case gguf_metadata_value_type::GGUF_METADATA_VALUE_TYPE_UINT8:
+        return x0.value_.uint8_ == x1.value_.uint8_;
+    case gguf_metadata_value_type::GGUF_METADATA_VALUE_TYPE_INT8:
+        return x0.value_.int8_ == x1.value_.int8_;
+    case gguf_metadata_value_type::GGUF_METADATA_VALUE_TYPE_UINT16:
+        return x0.value_.uint16_ == x1.value_.uint16_;
+    case gguf_metadata_value_type::GGUF_METADATA_VALUE_TYPE_INT16:
+        return x0.value_.int16_ == x1.value_.int16_;
+    case gguf_metadata_value_type::GGUF_METADATA_VALUE_TYPE_UINT32:
+        return x0.value_.uint32_ == x1.value_.uint32_;
+    case gguf_metadata_value_type::GGUF_METADATA_VALUE_TYPE_INT32:
+        return x0.value_.int32_ == x1.value_.int32_;
+    case gguf_metadata_value_type::GGUF_METADATA_VALUE_TYPE_UINT64:
+        return x0.value_.uint64_ == x1.value_.uint64_;
+    case gguf_metadata_value_type::GGUF_METADATA_VALUE_TYPE_INT64:
+        return x0.value_.int64_ == x1.value_.int64_;
+    case gguf_metadata_value_type::GGUF_METADATA_VALUE_TYPE_FLOAT32:
+        return x0.value_.float32_ == x1.value_.float32_;
+    case gguf_metadata_value_type::GGUF_METADATA_VALUE_TYPE_FLOAT64:
+        return x0.value_.float64_ == x1.value_.float64_;
+    case gguf_metadata_value_type::GGUF_METADATA_VALUE_TYPE_BOOL:
+        return x0.value_.bool_ == x1.value_.bool_;
+    case gguf_metadata_value_type::GGUF_METADATA_VALUE_TYPE_STRING:
+        return x0.value_.string_.length_ == x1.value_.string_.length_
+               && x0.value_.string_.offset_ == x1.value_.string_.offset_;
+    case gguf_metadata_value_type::GGUF_METADATA_VALUE_TYPE_ARRAY:
+        return x0.value_.array_.type_ == x1.value_.array_.type_
+               && x0.value_.array_.size_ == x1.value_.array_.size_
+               && x0.value_.array_.offset_ == x1.value_.array_.offset_;
+    }
+    return false;
+}
+
 uint64_t align_offset(uint64_t offset, uint32_t alignment)
 {
     return offset + (alignment - (offset % alignment)) % alignment;
 }
 
+//--- GGUFArray
+//------------------------------------------------------------
+uint8_t GGUFArray::getU8(uint64_t index) const
+{
+    assert(gguf_metadata_value_type::GGUF_METADATA_VALUE_TYPE_UINT8 == type_);
+    assert(index<size_);
+    return items_[index];
+}
+
+int8_t GGUFArray::getS8(uint64_t index) const
+{
+    assert(gguf_metadata_value_type::GGUF_METADATA_VALUE_TYPE_UINT8 == type_);
+    assert(index<size_);
+    return reinterpret_cast<const int8_t*>(items_)[index];
+}
+
+uint16_t GGUFArray::getU16(uint64_t index) const
+{
+    assert(gguf_metadata_value_type::GGUF_METADATA_VALUE_TYPE_UINT8 == type_);
+    assert(index<size_);
+    return reinterpret_cast<const uint16_t*>(items_)[index];
+}
+
+int16_t GGUFArray::getS16(uint64_t index) const
+{
+    assert(gguf_metadata_value_type::GGUF_METADATA_VALUE_TYPE_UINT8 == type_);
+    assert(index<size_);
+    return reinterpret_cast<const int16_t*>(items_)[index];
+}
+
+uint32_t GGUFArray::getU32(uint64_t index) const
+{
+    assert(gguf_metadata_value_type::GGUF_METADATA_VALUE_TYPE_UINT8 == type_);
+    assert(index<size_);
+    return reinterpret_cast<const uint32_t*>(items_)[index];
+}
+
+int32_t GGUFArray::getS32(uint64_t index) const
+{
+    assert(gguf_metadata_value_type::GGUF_METADATA_VALUE_TYPE_UINT8 == type_);
+    assert(index<size_);
+    return reinterpret_cast<const int32_t*>(items_)[index];
+}
+
+uint64_t GGUFArray::getU64(uint64_t index) const
+{
+    assert(gguf_metadata_value_type::GGUF_METADATA_VALUE_TYPE_UINT8 == type_);
+    assert(index<size_);
+    return reinterpret_cast<const uint64_t*>(items_)[index];
+}
+
+int64_t GGUFArray::getS64(uint64_t index) const
+{
+    assert(gguf_metadata_value_type::GGUF_METADATA_VALUE_TYPE_UINT8 == type_);
+    assert(index<size_);
+    return reinterpret_cast<const int64_t*>(items_)[index];
+}
+
+float GGUFArray::getF32(uint64_t index) const
+{
+    assert(gguf_metadata_value_type::GGUF_METADATA_VALUE_TYPE_UINT8 == type_);
+    assert(index<size_);
+    return reinterpret_cast<const float*>(items_)[index];
+}
+
+double GGUFArray::getF64(uint64_t index) const
+{
+    assert(gguf_metadata_value_type::GGUF_METADATA_VALUE_TYPE_UINT8 == type_);
+    assert(index<size_);
+    return reinterpret_cast<const double*>(items_)[index];
+}
+
+GGUFString GGUFArray::getString(uint64_t index) const
+{
+    assert(gguf_metadata_value_type::GGUF_METADATA_VALUE_TYPE_UINT8 == type_);
+    assert(index<size_);
+    gguf_string_t s = reinterpret_cast<const gguf_string_t*>(items_)[index];
+    GGUFString string;
+    string.length_ = s.length_;
+    string.str_ = reinterpret_cast<const char8_t*>(&data_[s.offset_]);
+    return string;
+}
+
+//--- GGUF
+//------------------------------------------------------------
 GGUF::GGUF()
     : size_(0)
     , data_(nullptr)
@@ -511,7 +641,7 @@ Error GGUF::load(const char8_t* filepath)
         }
         debug_print(metadata_[i]);
         uint64_t metadata_size = get_metadata_size(metadata_[i]);
-        if(metadata_size<=0 || size_<(offset+metadata_size)){
+        if(metadata_size <= 0 || size_ < (offset + metadata_size)) {
             return Error::InvalidFormat;
         }
         offset += metadata_size;
@@ -522,12 +652,12 @@ Error GGUF::load(const char8_t* filepath)
         if(Error::Success != parse_tensor_info(tensor_info_[i], offset)) {
             return Error::InvalidFormat;
         }
-        #ifdef _DEBUG
+#ifdef _DEBUG
         std::cout << "[" << i << "] ";
-        #endif
+#endif
         debug_print(tensor_info_[i]);
         uint64_t tensor_info_size = get_size(tensor_info_[i]);
-        if(size_<(offset+tensor_info_size)){
+        if(size_ < (offset + tensor_info_size)) {
             return Error::InvalidFormat;
         }
         if(!valid_type(tensor_info_[i].type_)) {
@@ -541,12 +671,12 @@ Error GGUF::load(const char8_t* filepath)
     }
     if(!validate_metadate(u8"general.quantization_version", gguf_metadata_value_type::GGUF_METADATA_VALUE_TYPE_UINT32)) {
         get_metadata_uint32(quantization_version_, u8"general.quantization_version");
-    }else{
+    } else {
         quantization_version_ = 0;
     }
     if(validate_metadate(u8"general.alignment", gguf_metadata_value_type::GGUF_METADATA_VALUE_TYPE_UINT32)) {
         get_metadata_uint32(alignment_, u8"general.alignment");
-    }else{
+    } else {
         alignment_ = 4;
     }
     offset = align_offset(offset, alignment_);
@@ -562,7 +692,7 @@ Error GGUF::load(const char8_t* filepath)
         }
         total_tensor_size += tensor_size;
     }
-    if(size_<(offset+total_tensor_size)){
+    if(size_ < (offset + total_tensor_size)) {
         return Error::InvalidFormat;
     }
     return Error::Success;
@@ -588,6 +718,123 @@ uint64_t GGUF::getNumMetaData() const
 const gguf_metadata_kv_t& GGUF::getMetaData(uint64_t x) const
 {
     return metadata_[x];
+}
+
+bool GGUF::getMetaData(const gguf_metadata_kv_t*& metadata, const char8_t* key) const
+{
+    assert(nullptr != key);
+    uint64_t len = ::strlen((const char*)key);
+    uint64_t hash = get_hash(len, key);
+    for(uint64_t i = 0; i < metadata_.size(); ++i) {
+        if(hash == metadata_[i].hash_ && len == metadata_[i].key_.length_) {
+            const char* str = reinterpret_cast<const char*>(&data_[metadata_[i].key_.offset_]);
+            if(0 == ::strncmp(str, reinterpret_cast<const char*>(key), len)) {
+                metadata = &metadata_[i];
+                return true;
+            }
+        }
+    }
+    metadata = nullptr;
+    return false;
+}
+
+uint8_t GGUF::getMetaDataU8(const gguf_metadata_kv_t& metadata) const
+{
+    assert(validate(metadata));
+    assert(gguf_metadata_value_type::GGUF_METADATA_VALUE_TYPE_UINT8 == metadata.value_type_);
+    return metadata.value_.uint8_;
+}
+
+int8_t GGUF::getMetaDataS8(const gguf_metadata_kv_t& metadata) const
+{
+    assert(validate(metadata));
+    assert(gguf_metadata_value_type::GGUF_METADATA_VALUE_TYPE_INT8 == metadata.value_type_);
+    return metadata.value_.int8_;
+}
+
+uint16_t GGUF::getMetaDataU16(const gguf_metadata_kv_t& metadata) const
+{
+    assert(validate(metadata));
+    assert(gguf_metadata_value_type::GGUF_METADATA_VALUE_TYPE_UINT16 == metadata.value_type_);
+    return metadata.value_.uint16_;
+}
+
+int16_t GGUF::getMetaDataS16(const gguf_metadata_kv_t& metadata) const
+{
+    assert(validate(metadata));
+    assert(gguf_metadata_value_type::GGUF_METADATA_VALUE_TYPE_INT16 == metadata.value_type_);
+    return metadata.value_.int16_;
+}
+
+uint32_t GGUF::getMetaDataU32(const gguf_metadata_kv_t& metadata) const
+{
+    assert(validate(metadata));
+    assert(gguf_metadata_value_type::GGUF_METADATA_VALUE_TYPE_UINT32 == metadata.value_type_);
+    return metadata.value_.uint32_;
+}
+
+int32_t GGUF::getMetaDataS32(const gguf_metadata_kv_t& metadata) const
+{
+    assert(validate(metadata));
+    assert(gguf_metadata_value_type::GGUF_METADATA_VALUE_TYPE_INT32 == metadata.value_type_);
+    return metadata.value_.int32_;
+}
+
+uint64_t GGUF::getMetaDataU64(const gguf_metadata_kv_t& metadata) const
+{
+    assert(validate(metadata));
+    assert(gguf_metadata_value_type::GGUF_METADATA_VALUE_TYPE_UINT64 == metadata.value_type_);
+    return metadata.value_.uint64_;
+}
+
+int64_t GGUF::getMetaDataS64(const gguf_metadata_kv_t& metadata) const
+{
+    assert(validate(metadata));
+    assert(gguf_metadata_value_type::GGUF_METADATA_VALUE_TYPE_INT64 == metadata.value_type_);
+    return metadata.value_.int64_;
+}
+
+float GGUF::getMetaDataF32(const gguf_metadata_kv_t& metadata) const
+{
+    assert(validate(metadata));
+    assert(gguf_metadata_value_type::GGUF_METADATA_VALUE_TYPE_FLOAT32 == metadata.value_type_);
+    return metadata.value_.float32_;
+}
+
+double GGUF::getMetaDataF64(const gguf_metadata_kv_t& metadata) const
+{
+    assert(validate(metadata));
+    assert(gguf_metadata_value_type::GGUF_METADATA_VALUE_TYPE_FLOAT64 == metadata.value_type_);
+    return metadata.value_.float64_;
+}
+
+bool GGUF::getMetaDataBool(const gguf_metadata_kv_t& metadata) const
+{
+    assert(validate(metadata));
+    assert(gguf_metadata_value_type::GGUF_METADATA_VALUE_TYPE_BOOL == metadata.value_type_);
+    return metadata.value_.bool_ != 0;
+}
+
+GGUFString GGUF::getMetaDataString(const gguf_metadata_kv_t& metadata) const
+{
+    assert(validate(metadata));
+    assert(gguf_metadata_value_type::GGUF_METADATA_VALUE_TYPE_STRING == metadata.value_type_);
+    GGUFString str;
+    str.length_ = metadata.value_.string_.length_;
+    str.str_ = reinterpret_cast<const char8_t*>(&data_[metadata.value_.string_.offset_]);
+    return str;
+}
+
+GGUFArray GGUF::getMetaDataArray(const gguf_metadata_kv_t& metadata) const
+{
+    assert(validate(metadata));
+    assert(gguf_metadata_value_type::GGUF_METADATA_VALUE_TYPE_ARRAY == metadata.value_type_);
+    GGUFArray array;
+    array.size_ = metadata.value_.array_.size_;
+    array.type_ = metadata.value_.array_.type_;
+    array.items_ = &data_[metadata.value_.array_.offset_];
+    array.data_ = data_;
+    return array;
 }
 
 uint64_t GGUF::getNumTensors() const
@@ -780,7 +1027,7 @@ bool GGUF::get_metadata_uint32(uint32_t& dst, const char8_t* key) const
 
 uint64_t GGUF::get_metadata_size(const gguf_metadata_kv_t& metadata) const
 {
-    uint32_t key_size = get_size(metadata.key_) + sizeof(gguf_metadata_value_type);
+    uint64_t key_size = get_size(metadata.key_) + sizeof(gguf_metadata_value_type);
     switch(metadata.value_type_) {
     case gguf_metadata_value_type::GGUF_METADATA_VALUE_TYPE_UINT8:
         return key_size + 1;
@@ -816,7 +1063,7 @@ uint64_t GGUF::get_metadata_size(const gguf_metadata_kv_t& metadata) const
 
 uint64_t GGUF::get_array_size(const gguf_array_t& array) const
 {
-    uint32_t size = sizeof(gguf_metadata_value_type) + sizeof(uint64_t);
+    uint64_t size = sizeof(gguf_metadata_value_type) + sizeof(uint64_t);
     switch(array.type_) {
     case gguf_metadata_value_type::GGUF_METADATA_VALUE_TYPE_UINT8:
         return size + array.size_;
@@ -935,6 +1182,16 @@ uint64_t GGUF::get_value_size(uint64_t offset, gguf_metadata_value_type type) co
     }
 }
 
+bool GGUF::validate(const gguf_metadata_kv_t& metadata) const
+{
+    for(uint64_t i = 0; i < metadata_.size(); ++i) {
+        if(metadata_[i] == metadata) {
+            return true;
+        }
+    }
+    return false;
+}
+
 void GGUF::debug_print(const gguf_string_t& str) const
 {
 #ifdef _DEBUG
@@ -971,7 +1228,7 @@ void GGUF::debug_print(gguf_metadata_value_type type, const gguf_metadata_value_
         std::cout << x.float32_;
         break;
     case gguf_metadata_value_type::GGUF_METADATA_VALUE_TYPE_BOOL:
-        std::cout << x.bool_;
+        std::cout << (x.bool_) ? "true" : "false";
         break;
     case gguf_metadata_value_type::GGUF_METADATA_VALUE_TYPE_STRING:
         debug_print(x.string_);

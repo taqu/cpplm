@@ -25,10 +25,10 @@ void* operator new(std::size_t size, std::align_val_t alignment, const std::noth
     return cppgpt::allocate(size, static_cast<std::size_t>(alignment));
 }
 
-//void* operator new(std::size_t /*size*/, void* ptr) noexcept
+// void* operator new(std::size_t /*size*/, void* ptr) noexcept
 //{
-//    return ptr;
-//}
+//     return ptr;
+// }
 
 void operator delete(void* ptr) noexcept
 {
@@ -60,10 +60,10 @@ void operator delete(void* ptr, std::align_val_t alignment, const std::nothrow_t
     cppgpt::deallocate(ptr, static_cast<std::size_t>(alignment));
 }
 
-//void operator delete(void* ptr, void*) noexcept
+// void operator delete(void* ptr, void*) noexcept
 //{
-//    (void)ptr;
-//}
+//     (void)ptr;
+// }
 
 void* operator new[](std::size_t size)
 {
@@ -85,10 +85,10 @@ void* operator new[](std::size_t size, std::align_val_t alignment, const std::no
     return cppgpt::allocate(size, static_cast<std::size_t>(alignment));
 }
 
-//void* operator new[](std::size_t /*size*/, void* ptr) noexcept
+// void* operator new[](std::size_t /*size*/, void* ptr) noexcept
 //{
-//    return ptr;
-//}
+//     return ptr;
+// }
 
 void operator delete[](void* ptr) noexcept
 {
@@ -120,10 +120,10 @@ void operator delete[](void* ptr, std::align_val_t alignment, const std::nothrow
     cppgpt::deallocate(ptr, static_cast<std::size_t>(alignment));
 }
 
-//void operator delete[](void* ptr, void*) noexcept
+// void operator delete[](void* ptr, void*) noexcept
 //{
-//    (void)ptr;
-//}
+//     (void)ptr;
+// }
 
 namespace cppgpt
 {
@@ -324,6 +324,276 @@ namespace
         }
     }
 } // namespace
+
+void* allocate(size_t size, size_t align)
+{
+    return mi_malloc_aligned(size, align);
+}
+
+void deallocate(void* ptr, size_t align)
+{
+    mi_free_aligned(ptr, align);
+}
+
+//--- wyhash
+//-----------------------------------------------------------
+namespace
+{
+    /* The Unlicense
+    This is free and unencumbered software released into the public domain.
+    Anyone is free to copy, modify, publish, use, compile, sell, or
+    distribute this software, either in source code form or as a compiled
+    binary, for any purpose, commercial or non-commercial, and by any
+    means.
+    In jurisdictions that recognize copyright laws, the author or authors
+    of this software dedicate any and all copyright interest in the
+    software to the public domain. We make this dedication for the benefit
+    of the public at large and to the detriment of our heirs and
+    successors. We intend this dedication to be an overt act of
+    relinquishment in perpetuity of all present and future rights to this
+    software under copyright law.
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+    EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+    MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+    IN NO EVENT SHALL THE AUTHORS BE LIABLE FOR ANY CLAIM, DAMAGES OR
+    OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
+    ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
+    OTHER DEALINGS IN THE SOFTWARE.
+    For more information, please refer to <http://unlicense.org/>
+    */
+    // This is free and unencumbered software released into the public domain under The Unlicense (http://unlicense.org/)
+    // main repo: https://github.com/wangyi-fudan/wyhash
+    // author: 王一 Wang Yi <godspeed_china@yeah.net>
+    // contributors: Reini Urban, Dietrich Epp, Joshua Haberman, Tommy Ettinger, Daniel Lemire, Otmar Ertl, cocowalla, leo-yuriev, Diego Barrios Romero, paulie-g, dumblob, Yann Collet, ivte-ms, hyb, James Z.M. Gao, easyaspi314 (Devin), TheOneric
+    // endian macros
+
+#ifndef WYHASH_LITTLE_ENDIAN
+#    if defined(_WIN32) || defined(__LITTLE_ENDIAN__) || (defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__)
+#        define WYHASH_LITTLE_ENDIAN 1
+#    elif defined(__BIG_ENDIAN__) || (defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__)
+#        define WYHASH_LITTLE_ENDIAN 0
+#    else
+#        warning could not determine endianness! Falling back to little endian.
+#        define WYHASH_LITTLE_ENDIAN 1
+#    endif
+#endif
+
+#if defined(__GNUC__) || defined(__INTEL_COMPILER) || defined(__clang__)
+#    define wyhash_likely(x) __builtin_expect((x), 1)
+#    define wyhash_unlikely(x) __builtin_expect((x), 0)
+#else
+#    define wyhash_likely(x) (x)
+#    define wyhash_unlikely(x) (x)
+#endif
+
+#if defined(__GNUC__) || defined(__INTEL_COMPILER) || defined(__clang__)
+#    define wyhash_restrict __restrict__
+#elif defined(_MSC_VER)
+#    define wyhash_restrict __restrict
+#else
+#    define wyhash_restrict
+#endif
+
+// read functions
+#if(WYHASH_LITTLE_ENDIAN)
+    static inline u64 wyhash_read8(const u8* p)
+    {
+        u64 v;
+        ::memcpy(&v, p, 8);
+        return v;
+    }
+
+    static inline u64 wyhash_read4(const u8* p)
+    {
+        u32 v;
+        ::memcpy(&v, p, 4);
+        return v;
+    }
+
+#elif defined(__GNUC__) || defined(__INTEL_COMPILER) || defined(__clang__)
+    static inline u64 wyhash_read8(const u8* p)
+    {
+        u64 v;
+        ::memcpy(&v, p, 8);
+        return __builtin_bswap64(v);
+    }
+    static inline u64 wyhash_read4(const u8* p)
+    {
+        u32 v;
+        ::memcpy(&v, p, 4);
+        return __builtin_bswap32(v);
+    }
+#elif defined(_MSC_VER)
+    static inline u64 wyhash_read8(const u8* p)
+    {
+        u64 v;
+        ::memcpy(&v, p, 8);
+        return _byteswap_uint64(v);
+    }
+    static inline u64 wyhash_read4(const u8* p)
+    {
+        u32 v;
+        ::memcpy(&v, p, 4);
+        return _byteswap_ulong(v);
+    }
+#else
+    static inline u64 wyhash_read8(const u8* p)
+    {
+        u64 v;
+        ::memcpy(&v, p, 8);
+        return (((v >> 56) & 0xff) | ((v >> 40) & 0xff00) | ((v >> 24) & 0xff0000) | ((v >> 8) & 0xff000000) | ((v << 8) & 0xff00000000) | ((v << 24) & 0xff0000000000) | ((v << 40) & 0xff000000000000) | ((v << 56) & 0xff00000000000000));
+    }
+    static inline u64 wyhash_read4(const u8* p)
+    {
+        u32 v;
+        ::memcpy(&v, p, 4);
+        return (((v >> 24) & 0xff) | ((v >> 8) & 0xff00) | ((v << 8) & 0xff0000) | ((v << 24) & 0xff000000));
+    }
+#endif
+
+    static inline u64 wyhash_read3(const u8* p, size_t size)
+    {
+        return (((u64)p[0]) << 16) | (((u64)p[size >> 1]) << 8) | p[size - 1];
+    }
+
+    // 128bit multiply function
+    static inline u64 wyhash_rot(u64 x)
+    {
+        return (x >> 32) | (x << 32);
+    }
+    static inline void wyhash_mum(u64* wyhash_restrict A, u64* wyhash_restrict B)
+    {
+#if(1)
+        u64 hh = (*A >> 32) * (*B >> 32);
+        u64 hl = (*A >> 32) * (u32)*B;
+        u64 lh = (u32)*A * (*B >> 32);
+        u64 ll = (u64)(u32)*A * (u32)*B;
+
+        *A = wyhash_rot(hl) ^ hh;
+        *B = wyhash_rot(lh) ^ ll;
+
+#elif defined(__SIZEOF_INT128__)
+        __uint128_t r = *A;
+        r *= *B;
+        *A = (u64)r;
+        *B = (u64)(r >> 64U);
+
+#elif defined(_MSC_VER) && defined(_M_X64)
+        *A = _umul128(*A, *B, B);
+#else
+        u64 ha = *A >> 32;
+        u64 hb = *B >> 32;
+        u64 la = (u32)*A;
+        u64 lb = (u32)*B;
+        u64 hi, lo;
+        u64 rh = ha * hb;
+        u64 rm0 = ha * lb;
+        u64 rm1 = hb * la;
+        u64 rl = la * lb;
+        u64 t = rl + (rm0 << 32);
+        u64 c = t < rl;
+        lo = t + (rm1 << 32);
+        c += lo < t;
+        hi = rh + (rm0 >> 32) + (rm1 >> 32) + c;
+        *A = lo;
+        *B = hi;
+#endif
+    }
+
+    // multiply and xor mix function, aka MUM
+    static inline u64 wyhash_mix(u64 A, u64 B)
+    {
+        wyhash_mum(&A, &B);
+        return A ^ B;
+    }
+
+    // the default secret parameters
+    static const u64 wyhash_param[4] = {0xA0761D6478BD642FULL, 0xE7037ED1A0B428DBULL, 0x8EBC6AF09C88C6E3ULL, 0x589965CC75374CC3ULL};
+
+    static inline u32 wyhash_combine(u32 x0, u32 x1)
+    {
+        u64 t = x0 ^ 0x53C5CA59U;
+        t *= x1 ^ 0x74743C1BU;
+        x0 = static_cast<u32>(t);
+        x1 = static_cast<u32>(t >> 32U);
+        return x0 ^ x1;
+    }
+
+} // namespace
+
+u32 wyhash32(size_t size, const void* key, u64 seed)
+{
+    seed = wyhash64(size, key, seed);
+    return (u32)(seed - (seed >> 32U));
+}
+
+u64 wyhash64(size_t size, const void* key, u64 seed)
+{
+    const u64* secret = wyhash_param;
+    const u8* p = (const u8*)key;
+    seed ^= *secret;
+    u64 a, b;
+    if(wyhash_likely(size <= 16)) {
+        if(wyhash_likely(4 <= size)) {
+            a = (wyhash_read4(p) << 32) | wyhash_read4(p + ((size >> 3) << 2));
+            b = (wyhash_read4(p + size - 4) << 32) | wyhash_read4(p + size - 4 - ((size >> 3) << 2));
+        } else if(wyhash_likely(0 < size)) {
+            a = wyhash_read3(p, size);
+            b = 0;
+        } else {
+            a = b = 0;
+        }
+    } else {
+        size_t i = size;
+        if(wyhash_unlikely(48 < i)) {
+            u64 see1 = seed;
+            u64 see2 = seed;
+            do {
+                seed = wyhash_mix(wyhash_read8(p) ^ secret[1], wyhash_read8(p + 8) ^ seed);
+                see1 = wyhash_mix(wyhash_read8(p + 16) ^ secret[2], wyhash_read8(p + 24) ^ see1);
+                see2 = wyhash_mix(wyhash_read8(p + 32) ^ secret[3], wyhash_read8(p + 40) ^ see2);
+                p += 48;
+                i -= 48;
+            } while(wyhash_likely(i > 48));
+            seed ^= see1 ^ see2;
+        }
+        while(wyhash_unlikely(i > 16)) {
+            seed = wyhash_mix(wyhash_read8(p) ^ secret[1], wyhash_read8(p + 8) ^ seed);
+            i -= 16;
+            p += 16;
+        }
+        a = wyhash_read8(p + i - 16);
+        b = wyhash_read8(p + i - 8);
+    }
+    return wyhash_mix(secret[1] ^ size, wyhash_mix(a ^ secret[1], b ^ seed));
+}
+
+//--- prime numbers
+//-----------------------------------------------------------
+u32 next_prime(u32 x)
+{
+    // clang-format off
+    static constexpr u32 table[] = {
+        5UL, 11UL, 17UL, 29UL, 37UL,
+        53UL, 67UL, 79UL, 97UL, 131UL,
+        193UL, 257UL, 389UL, 521UL, 769UL,
+        1031UL, 1543UL, 2053UL, 3079UL, 6151UL,
+        12289UL, 24593UL, 49157UL, 98317UL, 196613UL,
+        393241UL, 786433UL, 1572869UL, 3145739UL, 6291469UL,
+        12582917UL, 25165843UL, 50331653UL, 100663319UL, 201326611UL,
+        402653189UL, 805306457UL, 1610612741UL, 3221225473UL, 4294967291UL,
+    };
+    static constexpr u32 size = sizeof(table)/sizeof(table[0]);
+    // clang-format on
+
+    const u32* const prime_list_begin = table;
+    const u32* const prime_list_end = prime_list_begin + size;
+    const u32* bound = lower_bound(prime_list_begin, prime_list_end, x);
+    if(bound == prime_list_end) {
+        --bound;
+    }
+    return *bound;
+}
 
 namespace util
 {
@@ -820,41 +1090,6 @@ namespace util
     }
 } // namespace util
 
-void* allocate(size_t size, size_t align)
-{
-    return mi_malloc_aligned(size, align);
-}
-
-void deallocate(void* ptr, size_t align)
-{
-    mi_free_aligned(ptr, align);
-}
-
-u32 next_prime(u32 x)
-{
-    // clang-format off
-    static constexpr u32 table[] = {
-        5UL, 11UL, 17UL, 29UL, 37UL,
-        53UL, 67UL, 79UL, 97UL, 131UL,
-        193UL, 257UL, 389UL, 521UL, 769UL,
-        1031UL, 1543UL, 2053UL, 3079UL, 6151UL,
-        12289UL, 24593UL, 49157UL, 98317UL, 196613UL,
-        393241UL, 786433UL, 1572869UL, 3145739UL, 6291469UL,
-        12582917UL, 25165843UL, 50331653UL, 100663319UL, 201326611UL,
-        402653189UL, 805306457UL, 1610612741UL, 3221225473UL, 4294967291UL,
-    };
-    static constexpr u32 size = sizeof(table)/sizeof(table[0]);
-    // clang-format on
-
-    const u32* const prime_list_begin = table;
-    const u32* const prime_list_end = prime_list_begin + size;
-    const u32* bound = lower_bound(prime_list_begin, prime_list_end, x);
-    if(bound == prime_list_end) {
-        --bound;
-    }
-    return *bound;
-}
-
 //--- Timer
 //-----------------------------------------------------------
 Timer::Timer(s64& duration)
@@ -1200,7 +1435,7 @@ namespace op
 {
     Tensor convertF32(const Tensor& input)
     {
-        if(ggml_type::GGML_TYPE_F32 == input.type()){
+        if(ggml_type::GGML_TYPE_F32 == input.type()) {
             Tensor result(ggml_type::GGML_TYPE_F32, input, input.data<void>());
             return result;
         }
@@ -1210,114 +1445,87 @@ namespace op
         case ggml_type::GGML_TYPE_F32:
             util::copyf32_f(size, result.data<void>(), input.data<void>());
             break;
-        case ggml_type::GGML_TYPE_F16:{
+        case ggml_type::GGML_TYPE_F16: {
             util::copyf16_f(size, result.data<void>(), input.data<void>());
-            }
-            break;
-        case ggml_type::GGML_TYPE_Q4_0:{
+        } break;
+        case ggml_type::GGML_TYPE_Q4_0: {
             util::copy4_f(size, result.data<void>(), input.data<void>());
-            }
-            break;
-        case ggml_type::GGML_TYPE_Q4_1:{
+        } break;
+        case ggml_type::GGML_TYPE_Q4_1: {
             util::copy4_f(size, result.data<void>(), input.data<void>());
-            }
-            break;
-        case ggml_type::GGML_TYPE_Q5_0:{
+        } break;
+        case ggml_type::GGML_TYPE_Q5_0: {
             util::copy5_f(size, result.data<void>(), input.data<void>());
-            }
-            break;
-        case ggml_type::GGML_TYPE_Q5_1:{
+        } break;
+        case ggml_type::GGML_TYPE_Q5_1: {
             util::copy5_f(size, result.data<void>(), input.data<void>());
-            }
-            break;
-        case ggml_type::GGML_TYPE_Q8_0:{
+        } break;
+        case ggml_type::GGML_TYPE_Q8_0: {
             util::copy8_f(size, result.data<void>(), input.data<void>());
-            }
-            break;
-        case ggml_type::GGML_TYPE_Q8_1:{
+        } break;
+        case ggml_type::GGML_TYPE_Q8_1: {
             util::copy8_f(size, result.data<void>(), input.data<void>());
-            }
-            break;
-        case ggml_type::GGML_TYPE_Q2_K:{
+        } break;
+        case ggml_type::GGML_TYPE_Q2_K: {
             util::copy2_f(size, result.data<void>(), input.data<void>());
-            }
-            break;
-        case ggml_type::GGML_TYPE_Q3_K:{
+        } break;
+        case ggml_type::GGML_TYPE_Q3_K: {
             util::copy3_f(size, result.data<void>(), input.data<void>());
-            }
-            break;
-        case ggml_type::GGML_TYPE_Q4_K:{
+        } break;
+        case ggml_type::GGML_TYPE_Q4_K: {
             util::copy4_f(size, result.data<void>(), input.data<void>());
-            }
-            break;
-        case ggml_type::GGML_TYPE_Q5_K:{
+        } break;
+        case ggml_type::GGML_TYPE_Q5_K: {
             util::copy5_f(size, result.data<void>(), input.data<void>());
-            }
-            break;
-        case ggml_type::GGML_TYPE_Q6_K:{
+        } break;
+        case ggml_type::GGML_TYPE_Q6_K: {
             util::copy6_f(size, result.data<void>(), input.data<void>());
-            }
-            break;
-        case ggml_type::GGML_TYPE_Q8_K:{
+        } break;
+        case ggml_type::GGML_TYPE_Q8_K: {
             util::copy8_f(size, result.data<void>(), input.data<void>());
-            }
-            break;
-        case ggml_type::GGML_TYPE_IQ2_XXS:{
+        } break;
+        case ggml_type::GGML_TYPE_IQ2_XXS: {
             util::copy2_f(size, result.data<void>(), input.data<void>());
-            }
-            break;
-        case ggml_type::GGML_TYPE_IQ2_XS:{
+        } break;
+        case ggml_type::GGML_TYPE_IQ2_XS: {
             util::copy2_f(size, result.data<void>(), input.data<void>());
-            }
-            break;
-        case ggml_type::GGML_TYPE_IQ3_XXS:{
+        } break;
+        case ggml_type::GGML_TYPE_IQ3_XXS: {
             util::copy3_f(size, result.data<void>(), input.data<void>());
-            }
-            break;
-        case ggml_type::GGML_TYPE_IQ1_S:{
+        } break;
+        case ggml_type::GGML_TYPE_IQ1_S: {
             util::copy1_f(size, result.data<void>(), input.data<void>());
-            }
-            break;
-        case ggml_type::GGML_TYPE_IQ4_NL:{
+        } break;
+        case ggml_type::GGML_TYPE_IQ4_NL: {
             util::copy4_f(size, result.data<void>(), input.data<void>());
-            }
-            break;
-        case ggml_type::GGML_TYPE_IQ3_S:{
+        } break;
+        case ggml_type::GGML_TYPE_IQ3_S: {
             util::copy3_f(size, result.data<void>(), input.data<void>());
-            }
-            break;
-        case ggml_type::GGML_TYPE_IQ2_S:{
+        } break;
+        case ggml_type::GGML_TYPE_IQ2_S: {
             util::copy2_f(size, result.data<void>(), input.data<void>());
-            }
-            break;
-        case ggml_type::GGML_TYPE_IQ4_XS:{
+        } break;
+        case ggml_type::GGML_TYPE_IQ4_XS: {
             util::copy4_f(size, result.data<void>(), input.data<void>());
-            }
-            break;
-        case ggml_type::GGML_TYPE_I8:{
+        } break;
+        case ggml_type::GGML_TYPE_I8: {
             util::copyi8_f(size, result.data<void>(), input.data<void>());
-            }
-            break;
-        case ggml_type::GGML_TYPE_I16:{
+        } break;
+        case ggml_type::GGML_TYPE_I16: {
             util::copyi16_f(size, result.data<void>(), input.data<void>());
-            }
-            break;
-        case ggml_type::GGML_TYPE_I32:{
+        } break;
+        case ggml_type::GGML_TYPE_I32: {
             util::copyi32_f(size, result.data<void>(), input.data<void>());
-            }
-            break;
-        case ggml_type::GGML_TYPE_I64:{
+        } break;
+        case ggml_type::GGML_TYPE_I64: {
             util::copyi64_f(size, result.data<void>(), input.data<void>());
-            }
-            break;
-        case ggml_type::GGML_TYPE_F64:{
+        } break;
+        case ggml_type::GGML_TYPE_F64: {
             util::copyf64_f(size, result.data<void>(), input.data<void>());
-            }
-            break;
-        case ggml_type::GGML_TYPE_IQ1_M:{
+        } break;
+        case ggml_type::GGML_TYPE_IQ1_M: {
             util::copy1_f(size, result.data<void>(), input.data<void>());
-            }
-            break;
+        } break;
         default:
             assert(false);
             break;
@@ -1683,7 +1891,7 @@ namespace op
 //--- LayerNorm
 //-----------------------------------------------------------
 LayerNorm::LayerNorm()
-    :duration_(0)
+    : duration_(0)
 {
 }
 
@@ -1733,7 +1941,7 @@ Tensor LayerNorm::forward(const Tensor& input)
 //--- Embedding
 //-----------------------------------------------------------
 Embedding::Embedding()
-:duration_(0)
+    : duration_(0)
 {
 }
 
@@ -1743,7 +1951,7 @@ Embedding::Embedding(
     u32 d_embed,
     void* weight)
     : duration_(0)
-    ,weight_(type, {n_vocab, d_embed}, weight)
+    , weight_(type, {n_vocab, d_embed}, weight)
 {
 }
 
@@ -1787,7 +1995,7 @@ Tensor Embedding::forward_proj(const Tensor& input)
 //--- PositionalEmbedding
 //-----------------------------------------------------------
 PositionalEmbedding::PositionalEmbedding()
-    :duration_(0)
+    : duration_(0)
 {
 }
 
@@ -1797,7 +2005,7 @@ PositionalEmbedding::PositionalEmbedding(
     u64 d_embed,
     void* weight)
     : duration_(0)
-    ,weight_(type, {max_context, d_embed}, weight)
+    , weight_(type, {max_context, d_embed}, weight)
 {
 }
 
@@ -1838,7 +2046,7 @@ Tensor PositionalEmbedding::forward(u64 num_context)
 //--- GELU
 //-----------------------------------------------------------
 GELU::GELU()
-    :duration_(0)
+    : duration_(0)
 {
 }
 
@@ -1866,7 +2074,7 @@ Tensor GELU::forward(const Tensor& input)
 //--- Residual
 //-----------------------------------------------------------
 Residual::Residual()
-    :duration_(0)
+    : duration_(0)
 {
 }
 
@@ -1898,7 +2106,7 @@ Tensor Residual::forward(const Tensor& input0, const Tensor& input1)
 //--- Linear
 //-----------------------------------------------------------
 Linear::Linear()
-    :duration_(0)
+    : duration_(0)
 {
 }
 
@@ -1943,8 +2151,8 @@ Tensor Linear::forward(const Tensor& input)
 //--- MultiHeadSelfAttn
 //-----------------------------------------------------------
 MultiHeadSelfAttn::MultiHeadSelfAttn()
-    :duration_(0)
-    ,n_heads_(0)
+    : duration_(0)
+    , n_heads_(0)
 {
 }
 
@@ -1961,7 +2169,7 @@ MultiHeadSelfAttn::MultiHeadSelfAttn(
     void* qkv_proj_w,
     void* qkv_proj_b)
     : duration_(0)
-    ,n_heads_(n_heads)
+    , n_heads_(n_heads)
     , query_(type, n_embed, n_embed, query_w, query_b)
     , key_(type, n_embed, n_embed, key_w, key_b)
     , value_(type, n_embed, n_embed, value_w, value_b)
@@ -1985,15 +2193,15 @@ MultiHeadSelfAttn::MultiHeadSelfAttn(MultiHeadSelfAttn&& other)
 
 MultiHeadSelfAttn& MultiHeadSelfAttn::operator=(MultiHeadSelfAttn&& other)
 {
-    if(this != &other){
-    duration_ = 0;
-    n_heads_ = other.n_heads_;
-    query_ = std::move(other.query_);
-    key_ = std::move(other.key_);
-    value_ = std::move(other.value_);
-    qkv_proj_ = std::move(other.qkv_proj_);
+    if(this != &other) {
+        duration_ = 0;
+        n_heads_ = other.n_heads_;
+        query_ = std::move(other.query_);
+        key_ = std::move(other.key_);
+        value_ = std::move(other.value_);
+        qkv_proj_ = std::move(other.qkv_proj_);
 
-    other.n_heads_ = 0;
+        other.n_heads_ = 0;
     }
     return *this;
 }
@@ -2028,21 +2236,21 @@ Tensor MultiHeadSelfAttn::masked_qkv_attn(const Tensor& q, const Tensor& k, cons
 //--- ResidualAttnBlock
 //-----------------------------------------------------------
 ResidualAttnBlock::ResidualAttnBlock()
-    :duration_(0)
+    : duration_(0)
 {
 }
 
-//ResidualAttnBlock::ResidualAttnBlock(ggml_type type, u64 n_attn_heads, u64 d_embed, u64 d_mlp, u64 max_ctx)
-//    : attn_ln_(type, max_ctx, d_embed,LayerNorm(max_ctx, d_embed)},
-//      attn{MultiHeadSelfAttn(n_attn_heads, d_embed, max_ctx)},
-//      inp_res{Residual(max_ctx, d_embed)},
-//      mlp_ln{LayerNorm(max_ctx, d_embed)},
-//      mlp_fc{Linear(d_embed, d_mlp, max_ctx)},
-//      gelu{GELU(max_ctx, d_mlp, /*cache_ctx_acv=*/true)},
-//      mlp_proj{Linear(d_mlp, d_embed, max_ctx)},
-//      attn_res{Residual(max_ctx, d_embed)}
+// ResidualAttnBlock::ResidualAttnBlock(ggml_type type, u64 n_attn_heads, u64 d_embed, u64 d_mlp, u64 max_ctx)
+//     : attn_ln_(type, max_ctx, d_embed,LayerNorm(max_ctx, d_embed)},
+//       attn{MultiHeadSelfAttn(n_attn_heads, d_embed, max_ctx)},
+//       inp_res{Residual(max_ctx, d_embed)},
+//       mlp_ln{LayerNorm(max_ctx, d_embed)},
+//       mlp_fc{Linear(d_embed, d_mlp, max_ctx)},
+//       gelu{GELU(max_ctx, d_mlp, /*cache_ctx_acv=*/true)},
+//       mlp_proj{Linear(d_mlp, d_embed, max_ctx)},
+//       attn_res{Residual(max_ctx, d_embed)}
 //{
-//}
+// }
 
 ResidualAttnBlock::~ResidualAttnBlock()
 {
@@ -2095,13 +2303,86 @@ Tensor ResidualAttnBlock::forward(const Tensor& input)
 //-----------------------------------------------------------
 RMSNorm::RMSNorm(ggml_type type, u32 dimensions, f32 epsilon)
     : duration_(0)
-    ,epsilon_(epsilon)
+    , epsilon_(epsilon)
     , weight_(type, {dimensions})
 {
 }
 
 RMSNorm::~RMSNorm()
 {
+}
+
+//--- Tokens
+//-----------------------------------------------------------
+Tokens::Tokens()
+    :size_(0)
+{
+}
+
+Tokens::Tokens(const gguf::GGUF& model_data)
+    :size_(0)
+{
+    const gguf::gguf_metadata_kv_t* metadata = nullptr;
+}
+
+Tokens::~Tokens()
+{
+}
+
+Tokens::Tokens(Tokens&& other)
+    :size_(other.size_)
+    ,tokenToId_(std::move(other.tokenToId_))
+    ,idToToken_(std::move(other.idToToken_))
+{
+    other.size_ = 0;
+}
+
+Tokens& Tokens::operator=(Tokens&& other)
+{
+    if(this != &other) {
+        size_ = other.size_;
+        tokenToId_ = std::move(other.tokenToId_);
+        idToToken_ = std::move(other.idToToken_);
+        other.size_ = 0;
+    }
+    return *this;
+}
+
+//--- Tokenizer
+//-----------------------------------------------------------
+const char8_t* GPT2TokenizerRef::Pattern = u8"('s|'t|'re|'ve|'m|'ll|'d| ?[[:alpha:]]+| ?[[:digit:]]+| ?[^\s[:alpha:][:digit:]]+|\s+(?!\S)|\s+)";
+GPT2TokenizerRef::GPT2TokenizerRef()
+    :size_(0)
+{
+}
+
+GPT2TokenizerRef::GPT2TokenizerRef(const gguf::GGUF& model_data)
+    :size_(0)
+{
+}
+
+GPT2TokenizerRef::~GPT2TokenizerRef()
+{
+}
+
+GPT2TokenizerRef::GPT2TokenizerRef(GPT2TokenizerRef&& other)
+{
+}
+
+GPT2TokenizerRef& GPT2TokenizerRef::operator=(GPT2TokenizerRef&& other)
+{
+    return *this;
+}
+
+GPT2TokenizerRef::String GPT2TokenizerRef::decode(int32_t token_id) const
+{
+    return String{};
+}
+
+Array<uint32_t> GPT2TokenizerRef::encode(const Array<char8_t>& text) const
+{
+    Array<uint32_t> tokens;
+    return tokens;
 }
 
 //--- Model
@@ -2125,7 +2406,7 @@ Llama2::Llama2(const Config& config)
 {
 }
 
-Llama2::Llama2(Llama2&& other)
+Llama2::Llama2(Llama2&& /*other*/)
 {
 }
 

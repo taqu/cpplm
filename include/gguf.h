@@ -110,7 +110,7 @@ union gguf_metadata_value_t
     uint64_t uint64_;
     int64_t int64_;
     double float64_;
-    bool bool_;
+    uint8_t bool_;
     gguf_string_t string_;
     gguf_array_t array_;
 };
@@ -131,6 +131,8 @@ struct gguf_metadata_kv_t
     // The value.
     gguf_metadata_value_t value_;
 };
+
+bool operator==(const gguf_metadata_kv_t& x0, const gguf_metadata_kv_t& x1);
 
 struct gguf_header_t
 {
@@ -224,6 +226,8 @@ enum class Error
     IOError,
 };
 
+//--- Array
+//------------------------------------------------------------
 template<class T>
 class Array
 {
@@ -355,6 +359,36 @@ bool Array<T>::expand(uint64_t capacity)
     return true;
 }
 
+struct GGUFString
+{
+    uint64_t length_;
+    const char8_t* str_;
+};
+
+//--- GGUFArray
+//------------------------------------------------------------
+struct GGUFArray
+{
+    uint8_t getU8(uint64_t index) const;
+    int8_t getS8(uint64_t index) const;
+    uint16_t getU16(uint64_t index) const;
+    int16_t getS16(uint64_t index) const;
+    uint32_t getU32(uint64_t index) const;
+    int32_t getS32(uint64_t index) const;
+    uint64_t getU64(uint64_t index) const;
+    int64_t getS64(uint64_t index) const;
+    float getF32(uint64_t index) const;
+    double getF64(uint64_t index) const;
+    GGUFString getString(uint64_t index) const;
+
+    gguf_metadata_value_type type_;
+    uint64_t size_;
+    const uint8_t* items_;
+    const uint8_t* data_;
+};
+
+//--- GGUF
+//------------------------------------------------------------
 class GGUF
 {
 public:
@@ -364,6 +398,22 @@ public:
     Error load(const char8_t* filepath);
     uint64_t getNumMetaData() const;
     const gguf_metadata_kv_t& getMetaData(uint64_t x) const;
+    bool getMetaData(const gguf_metadata_kv_t*& metadata, const char8_t* key) const;
+    
+    uint8_t getMetaDataU8(const gguf_metadata_kv_t& metadata) const;
+    int8_t getMetaDataS8(const gguf_metadata_kv_t& metadata) const;
+    uint16_t getMetaDataU16(const gguf_metadata_kv_t& metadata) const;
+    int16_t getMetaDataS16(const gguf_metadata_kv_t& metadata) const;
+    uint32_t getMetaDataU32(const gguf_metadata_kv_t& metadata) const;
+    int32_t getMetaDataS32(const gguf_metadata_kv_t& metadata) const;
+    uint64_t getMetaDataU64(const gguf_metadata_kv_t& metadata) const;
+    int64_t getMetaDataS64(const gguf_metadata_kv_t& metadata) const;
+    float getMetaDataF32(const gguf_metadata_kv_t& metadata) const;
+    double getMetaDataF64(const gguf_metadata_kv_t& metadata) const;
+    bool getMetaDataBool(const gguf_metadata_kv_t& metadata) const;
+    GGUFString getMetaDataString(const gguf_metadata_kv_t& metadata) const;
+    GGUFArray getMetaDataArray(const gguf_metadata_kv_t& metadata) const;
+
     uint64_t getNumTensors() const;
     const gguf_tensor_info_t& getTensor(uint64_t x) const;
     const void* getTensorData(uint64_t x) const;
@@ -385,6 +435,8 @@ private:
     uint64_t get_array_size(const gguf_array_t& array) const;
     uint64_t get_string_size(uint64_t offset) const;
     uint64_t get_value_size(uint64_t offset, gguf_metadata_value_type type) const;
+
+    bool validate(const gguf_metadata_kv_t& metadata) const;
 
     void debug_print(const gguf_string_t& str) const;
     void debug_print(gguf_metadata_value_type type, const gguf_metadata_value_t& x) const;
