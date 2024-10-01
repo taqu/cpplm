@@ -2315,14 +2315,81 @@ RMSNorm::~RMSNorm()
 //--- Tokens
 //-----------------------------------------------------------
 Tokens::Tokens()
-    :size_(0)
+    : model_{}
+    , tokens_{}
+    , scores_{}
+    , token_types_{}
+    , merges_{}
+    , added_tokens_{}
+    , bos_token_id_(0)
+    , eos_token_id_(0)
+    , unknown_token_id_(0)
+    , separator_token_id_(0)
+    , padding_token_id_(0)
 {
 }
 
 Tokens::Tokens(const gguf::GGUF& model_data)
-    :size_(0)
+    : model_{}
+    , tokens_{}
+    , scores_{}
+    , token_types_{}
+    , merges_{}
+    , added_tokens_{}
+    , bos_token_id_(0)
+    , eos_token_id_(0)
+    , unknown_token_id_(0)
+    , separator_token_id_(0)
+    , padding_token_id_(0)
 {
-    const gguf::gguf_metadata_kv_t* metadata = nullptr;
+    using namespace gguf;
+    const gguf_metadata_kv_t* metadata = nullptr;
+    if(model_data.getMetaData(metadata, gguf_metadata_value_type::GGUF_METADATA_VALUE_TYPE_STRING, u8"tokenizer.ggml.model")) {
+        model_ = model_data.getMetaDataString(*metadata);
+    }
+
+    if(model_data.getArrayMetaData(metadata, gguf_metadata_value_type::GGUF_METADATA_VALUE_TYPE_STRING, u8"tokenizer.ggml.tokens")) {
+        tokens_ = model_data.getMetaDataArray(*metadata);
+    }
+    if(model_data.getArrayMetaData(metadata, gguf_metadata_value_type::GGUF_METADATA_VALUE_TYPE_FLOAT32, u8"tokenizer.ggml.scores")) {
+        scores_ = model_data.getMetaDataArray(*metadata);
+    }
+    if(model_data.getArrayMetaData(metadata, gguf_metadata_value_type::GGUF_METADATA_VALUE_TYPE_INT32, u8"tokenizer.ggml.token_type")) {
+        token_types_ = model_data.getMetaDataArray(*metadata);
+    }
+    if(model_data.getArrayMetaData(metadata, gguf_metadata_value_type::GGUF_METADATA_VALUE_TYPE_STRING, u8"tokenizer.ggml.merges")) {
+        merges_ = model_data.getMetaDataArray(*metadata);
+    }
+    if(model_data.getArrayMetaData(metadata, gguf_metadata_value_type::GGUF_METADATA_VALUE_TYPE_STRING, u8"tokenizer.ggml.added_tokens")) {
+        added_tokens_ = model_data.getMetaDataArray(*metadata);
+    }
+
+    if(model_data.getMetaData(metadata, gguf_metadata_value_type::GGUF_METADATA_VALUE_TYPE_UINT32, u8"tokenizer.ggml.bos_token_id")) {
+        bos_token_id_ = model_data.getMetaDataU32(*metadata);
+    }
+    if(model_data.getMetaData(metadata, gguf_metadata_value_type::GGUF_METADATA_VALUE_TYPE_UINT32, u8"tokenizer.ggml.eos_token_id")) {
+        eos_token_id_ = model_data.getMetaDataU32(*metadata);
+    }
+    if(model_data.getMetaData(metadata, gguf_metadata_value_type::GGUF_METADATA_VALUE_TYPE_UINT32, u8"tokenizer.ggml.unknown_token_id")) {
+        unknown_token_id_ = model_data.getMetaDataU32(*metadata);
+    }
+    if(model_data.getMetaData(metadata, gguf_metadata_value_type::GGUF_METADATA_VALUE_TYPE_UINT32, u8"tokenizer.ggml.separator_token_id")) {
+        separator_token_id_ = model_data.getMetaDataU32(*metadata);
+    }
+    if(model_data.getMetaData(metadata, gguf_metadata_value_type::GGUF_METADATA_VALUE_TYPE_UINT32, u8"tokenizer.ggml.padding_token_id")) {
+        padding_token_id_ = model_data.getMetaDataU32(*metadata);
+    }
+
+    // Add tokens to maps
+    tokenToId_.reserve(static_cast<u32>(tokens_.size_));
+    idToToken_.reserve(static_cast<u32>(tokens_.size_));
+    u32 id = 0;
+    for(GGUFArray::Iterator<GGUFString> itr = tokens_.begin<GGUFString>(); itr; ++itr, ++id) {
+        GGUFString ggufStr = *itr;
+        String str = {ggufStr.length_, ggufStr.str_};
+        tokenToId_.add(str, id);
+        idToToken_.add(id, str);
+    }
 }
 
 Tokens::~Tokens()
@@ -2330,34 +2397,183 @@ Tokens::~Tokens()
 }
 
 Tokens::Tokens(Tokens&& other)
-    :size_(other.size_)
-    ,tokenToId_(std::move(other.tokenToId_))
-    ,idToToken_(std::move(other.idToToken_))
+    : model_(other.model_)
+    , tokens_(other.tokens_)
+    , scores_(other.scores_)
+    , token_types_(other.token_types_)
+    , merges_(other.merges_)
+    , added_tokens_(other.added_tokens_)
+    , bos_token_id_(other.bos_token_id_)
+    , eos_token_id_(other.eos_token_id_)
+    , unknown_token_id_(other.unknown_token_id_)
+    , separator_token_id_(other.separator_token_id_)
+    , padding_token_id_(other.padding_token_id_)
+    , tokenToId_(std::move(other.tokenToId_))
+    , idToToken_(std::move(other.idToToken_))
 {
-    other.size_ = 0;
+    other.model_ = {};
+    other.tokens_ = {};
+    other.scores_ = {};
+    other.token_types_ = {};
+    other.merges_ = {};
+    other.added_tokens_ = {};
+    other.bos_token_id_ = 0;
+    other.eos_token_id_ = 0;
+    other.unknown_token_id_ = 0;
+    other.separator_token_id_ = 0;
+    other.padding_token_id_ = 0;
 }
 
 Tokens& Tokens::operator=(Tokens&& other)
 {
     if(this != &other) {
-        size_ = other.size_;
+        model_ = other.model_;
+        tokens_ = other.tokens_;
+        scores_ = other.scores_;
+        token_types_ = other.token_types_;
+        merges_ = other.merges_;
+        added_tokens_ = other.added_tokens_;
+        bos_token_id_ = other.bos_token_id_;
+        eos_token_id_ = other.eos_token_id_;
+        unknown_token_id_ = other.unknown_token_id_;
+        separator_token_id_ = other.separator_token_id_;
+        padding_token_id_ = other.padding_token_id_;
         tokenToId_ = std::move(other.tokenToId_);
         idToToken_ = std::move(other.idToToken_);
-        other.size_ = 0;
+
+        other.model_ = {};
+        other.tokens_ = {};
+        other.scores_ = {};
+        other.token_types_ = {};
+        other.merges_ = {};
+        other.added_tokens_ = {};
+        other.bos_token_id_ = 0;
+        other.eos_token_id_ = 0;
+        other.unknown_token_id_ = 0;
+        other.separator_token_id_ = 0;
+        other.padding_token_id_ = 0;
     }
     return *this;
 }
 
-//--- Tokenizer
+const gguf::GGUFString& Tokens::getModel() const
+{
+    return model_;
+}
+
+const gguf::GGUFArray& Tokens::getTokens() const
+{
+    return tokens_;
+}
+
+const gguf::GGUFArray& Tokens::getScores() const
+{
+    return scores_;
+}
+
+const gguf::GGUFArray& Tokens::getTokenTypes() const
+{
+    return token_types_;
+}
+
+const gguf::GGUFArray& Tokens::getMerges() const
+{
+    return merges_;
+}
+
+const gguf::GGUFArray& Tokens::getAddedTokens() const
+{
+    return added_tokens_;
+}
+
+u32 Tokens::getBOS() const
+{
+    return bos_token_id_;
+}
+
+u32 Tokens::getEOS() const
+{
+    return eos_token_id_;
+}
+
+u32 Tokens::getUnknown() const
+{
+    return unknown_token_id_;
+}
+
+u32 Tokens::getSeparator() const
+{
+    return separator_token_id_;
+}
+
+u32 Tokens::getPadding() const
+{
+    return padding_token_id_;
+}
+
+bool Tokens::encode(u32& token, const char8_t* str) const
+{
+    assert(nullptr != str);
+    String key;
+    key.len_ = ::strnlen(reinterpret_cast<const char*>(str), 128);
+    key.str_ = str;
+    const u32* id = nullptr;
+    if(tokenToId_.tryGet(key, id)){
+        token = *id;
+        return true;
+    }
+    return false;
+}
+
+bool Tokens::encode(u32& token, u64 length, const char8_t* str) const
+{
+    assert(nullptr != str);
+    String key;
+    key.len_ = length;
+    key.str_ = str;
+    const u32* id = nullptr;
+    if(tokenToId_.tryGet(key, id)){
+        token = *id;
+        return true;
+    }
+    return false;
+}
+
+bool Tokens::decode(char8_t str[512], u32 token) const
+{
+    const String* value = nullptr;
+    if(idToToken_.tryGet(token, value)){
+        u64 len = (std::min)(511ULL, value->len_);
+        ::memcpy(str, value->str_, len);
+        str[len] = u8'\0';
+        return true;
+    }
+    return false;
+}
+
+bool Tokens::decode(u64 length, char8_t str[], u32 token) const
+{
+    assert(0<length);
+    const String* value = nullptr;
+    if(idToToken_.tryGet(token, value)){
+        u64 len = (std::min)(length-1, value->len_);
+        ::memcpy(str, value->str_, len);
+        str[len] = u8'\0';
+        return true;
+    }
+    return false;
+}
+
+//--- GPT2TokenizerRef
 //-----------------------------------------------------------
-const char8_t* GPT2TokenizerRef::Pattern = u8"('s|'t|'re|'ve|'m|'ll|'d| ?[[:alpha:]]+| ?[[:digit:]]+| ?[^\s[:alpha:][:digit:]]+|\s+(?!\S)|\s+)";
+const char8_t* GPT2TokenizerRef::Pattern = u8R"('s|'t|'re|'ve|'m|'ll|'d| ?[[:alpha:]]+| ?[[:digit:]]+| ?[^\s[:alpha:][:digit:]]+|\s+(?!\S)|\s+)";
 GPT2TokenizerRef::GPT2TokenizerRef()
-    :size_(0)
+    : size_(0)
 {
 }
 
 GPT2TokenizerRef::GPT2TokenizerRef(const gguf::GGUF& model_data)
-    :size_(0)
+    : size_(0)
 {
 }
 

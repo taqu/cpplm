@@ -5,11 +5,11 @@
 #include <chrono>
 #include <cstdint>
 #include <initializer_list>
+#include <istream>
 #include <memory>
 #include <re2/re2.h>
 #include <type_traits>
 #include <utility>
-#include <istream>
 
 // new/delete
 void* operator new(std::size_t size);
@@ -40,7 +40,7 @@ void operator delete[](void* ptr, std::align_val_t alignment, const std::nothrow
 
 namespace gguf
 {
-    class GGUF;
+class GGUF;
 }
 
 namespace cppgpt
@@ -103,6 +103,7 @@ template<class T>
 class Array
 {
     static_assert(std::is_trivially_copyable<T>::value == true, "T should be trivially copyable.");
+
 public:
     inline static constexpr uint64_t Expand = 16;
     Array();
@@ -156,7 +157,7 @@ Array<T>::Array(Array&& other)
 template<class T>
 Array<T>& Array<T>::operator=(Array&& other)
 {
-    if(this != &other){
+    if(this != &other) {
         delete[] items_;
         capacity_ = other.capacity_;
         size_ = other.size_;
@@ -205,7 +206,7 @@ bool Array<T>::reserve(uint64_t capacity)
 {
     capacity = (std::max)(size_, capacity);
     uint64_t new_capacity = Expand;
-    while(new_capacity<capacity){
+    while(new_capacity < capacity) {
         new_capacity += Expand;
     }
     return expand(new_capacity);
@@ -216,14 +217,14 @@ bool Array<T>::resize(uint64_t size)
 {
     size = (std::max)(capacity_, size);
     uint64_t new_capacity = Expand;
-    while(new_capacity<size){
+    while(new_capacity < size) {
         new_capacity += Expand;
     }
-    if(expand(new_capacity)){
-        assert(size<new_capacity);
+    if(expand(new_capacity)) {
+        assert(size < new_capacity);
         size_ = size;
         return true;
-    }else{
+    } else {
         return false;
     }
 }
@@ -231,11 +232,11 @@ bool Array<T>::resize(uint64_t size)
 template<class T>
 bool Array<T>::push_back(const T& x)
 {
-    if(capacity_<=size_){
-        if(!expand(capacity_+Expand)){
+    if(capacity_ <= size_) {
+        if(!expand(capacity_ + Expand)) {
             return false;
         }
-        assert(size_<capacity_);
+        assert(size_ < capacity_);
     }
     items_[size_] = x;
     ++size_;
@@ -245,8 +246,9 @@ bool Array<T>::push_back(const T& x)
 template<class T>
 bool Array<T>::expand(uint64_t capacity)
 {
-    if(capacity<=capacity_){
-        return true;;
+    if(capacity <= capacity_) {
+        return true;
+        ;
     }
     T* items = new T[capacity];
     if(nullptr != items_) {
@@ -279,12 +281,16 @@ public:
     ~HashMap();
     HashMap(HashMap<T, U>&& other);
     HashMap& operator=(HashMap<T, U>&& other);
+    void reserve(u32 capacity);
     u32 size() const;
     void clear();
     void add(const T& key, const U& value);
     void remove(const T& key);
     void remove(u32 pos);
     u32 find(const T& key) const;
+    bool tryGet(const T& key, const U*& value) const;
+    bool tryGet(const T& key, U*& value);
+
     void swap(HashMap& other);
 
     u32 begin() const;
@@ -380,13 +386,13 @@ HashMap<T, U>::~HashMap()
 
 template<class T, class U>
 HashMap<T, U>::HashMap(HashMap<T, U>&& other)
-    :capacity_(other.capacity_)
-    ,size_(other.size_)
-    ,empty_(other.empty_)
-    ,hasher_(other.hasher_)
-    ,entries_(other.entries_)
-    ,keys_(other.keys_)
-    ,values_(other.values_)
+    : capacity_(other.capacity_)
+    , size_(other.size_)
+    , empty_(other.empty_)
+    , hasher_(other.hasher_)
+    , entries_(other.entries_)
+    , keys_(other.keys_)
+    , values_(other.values_)
 {
     other.capacity_ = 0;
     other.size_ = 0;
@@ -397,7 +403,7 @@ HashMap<T, U>::HashMap(HashMap<T, U>&& other)
 }
 
 template<class T, class U>
-    HashMap<T,U>& HashMap<T, U>::operator=(HashMap<T, U>&& other)
+HashMap<T, U>& HashMap<T, U>::operator=(HashMap<T, U>&& other)
 {
     if(this != &other) {
         clear();
@@ -419,6 +425,18 @@ template<class T, class U>
         other.values_ = nullptr;
     }
     return *this;
+}
+
+template<class T, class U>
+void HashMap<T, U>::reserve(u32 capacity)
+{
+    clear();
+    deallocate(entries_);
+    capacity_ = 0;
+    entries_ = nullptr;
+    keys_ = nullptr;
+    values_ = nullptr;
+    create(capacity);
 }
 
 template<class T, class U>
@@ -498,6 +516,27 @@ template<class T, class U>
 u32 HashMap<T, U>::find(const T& key) const
 {
     return (0 < capacity_) ? find(key, hasher_(key)) : end();
+}
+template<class T, class U>
+bool HashMap<T, U>::tryGet(const T& key, const U*& value) const
+{
+    u32 pos = find(key);
+    if(pos != end()) {
+        value = &getValue(pos);
+        return true;
+    }
+    return false;
+}
+
+template<class T, class U>
+bool HashMap<T, U>::tryGet(const T& key, U*& value)
+{
+    u32 pos = find(key);
+    if(pos != end()) {
+        value = &getValue(pos);
+        return true;
+    }
+    return false;
 }
 
 template<class T, class U>
@@ -1032,26 +1071,79 @@ private:
     Tensor weight_;
 };
 
+//--- String
+//-----------------------------------------------------------
+struct String
+{
+    u64 len_;
+    const char8_t* str_;
+    bool operator==(const String& x) const
+    {
+        return len_==x.len_ && 0 == ::strncmp((const char*)str_, (const char*)x.str_, len_);
+    }
+};
+
+template<>
+struct Hasher<String>
+{
+    u32 operator()(const String& x) const
+    {
+        return wyhash32(x.len_, x.str_);
+    }
+};
+
+template<>
+struct Hasher<u32>
+{
+    u32 operator()(const u32& x) const
+    {
+        return wyhash32(sizeof(u32), &x);
+    }
+};
+
 //--- Tokens
 //-----------------------------------------------------------
 class Tokens
 {
 public:
-    struct String
-    {
-        u64 len_;
-        const char8_t* str_;
-    };
+    inline static constexpr u32 Invalid = 0xFFFF'FFFFUL;
 
     Tokens();
     Tokens(const gguf::GGUF& model_data);
     ~Tokens();
     Tokens(Tokens&& other);
     Tokens& operator=(Tokens&& other);
+
+    const gguf::GGUFString& getModel() const;
+    const gguf::GGUFArray& getTokens() const;
+    const gguf::GGUFArray& getScores() const;
+    const gguf::GGUFArray& getTokenTypes() const;
+    const gguf::GGUFArray& getMerges() const;
+    const gguf::GGUFArray& getAddedTokens() const;
+    u32 getBOS() const;
+    u32 getEOS() const;
+    u32 getUnknown() const;
+    u32 getSeparator() const;
+    u32 getPadding() const;
+
+    bool encode(u32& token, const char8_t* str) const;
+    bool encode(u32& token, u64 length, const char8_t* str) const;
+    bool decode(char8_t str[512], u32 token) const;
+    bool decode(u64 length, char8_t str[], u32 token) const;
 private:
     Tokens(const Tokens&) = delete;
     Tokens& operator=(const Tokens&) = delete;
-    u32 size_;
+    gguf::GGUFString model_;
+    gguf::GGUFArray tokens_;
+    gguf::GGUFArray scores_;
+    gguf::GGUFArray token_types_;
+    gguf::GGUFArray merges_;
+    gguf::GGUFArray added_tokens_;
+    u32 bos_token_id_;
+    u32 eos_token_id_;
+    u32 unknown_token_id_;
+    u32 separator_token_id_;
+    u32 padding_token_id_;
     HashMap<String, u32> tokenToId_;
     HashMap<u32, String> idToToken_;
 };

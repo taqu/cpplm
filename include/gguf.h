@@ -5,6 +5,7 @@
  */
 #include <cassert>
 #include <cstdint>
+#include <cstring>
 #include <type_traits>
 #include <utility>
 #include <tuple>
@@ -369,22 +370,88 @@ struct GGUFString
 //------------------------------------------------------------
 struct GGUFArray
 {
-    uint8_t getU8(uint64_t index) const;
-    int8_t getS8(uint64_t index) const;
-    uint16_t getU16(uint64_t index) const;
-    int16_t getS16(uint64_t index) const;
-    uint32_t getU32(uint64_t index) const;
-    int32_t getS32(uint64_t index) const;
-    uint64_t getU64(uint64_t index) const;
-    int64_t getS64(uint64_t index) const;
-    float getF32(uint64_t index) const;
-    double getF64(uint64_t index) const;
-    GGUFString getString(uint64_t index) const;
+    template<class T>
+    struct Iterator
+    {
+        Iterator(uint64_t size, const uint8_t* data)
+            :size_(size)
+            ,count_(0)
+            ,data_(data)
+        {
+        }
+
+        operator bool() const
+        {
+            return count_<size_;
+        }
+
+        Iterator<T>& operator++()
+        {
+            ++count_;
+            data_ += sizeof(T);
+            return *this;
+        }
+
+        T operator*()
+        {
+            T t;
+            ::memcpy(&t, data_, sizeof(T));
+            return t;
+        }
+
+        uint64_t size_;
+        uint64_t count_;
+        const uint8_t* data_;
+    };
+
+    template<>
+    struct Iterator<GGUFString>
+    {
+        Iterator(uint64_t size, const uint8_t* data)
+            :size_(size)
+            ,count_(0)
+            ,data_(data)
+        {
+        }
+
+        operator bool() const
+        {
+            return count_<size_;
+        }
+
+        Iterator<GGUFString>& operator++()
+        {
+            ++count_;
+            uint64_t length;
+            ::memcpy(&length, data_, sizeof(uint64_t));
+            data_ += sizeof(uint64_t);
+            data_ += length;
+            return *this;
+        }
+
+        GGUFString operator*()
+        {
+            GGUFString str;
+            ::memcpy(&str.length_, data_, sizeof(uint64_t));
+            str.str_ = reinterpret_cast<const char8_t*>(data_ + sizeof(uint64_t));
+            return str;
+        }
+
+        uint64_t size_;
+        uint64_t count_;
+        const uint8_t* data_;
+    };
+
+
+    template<class T>
+    Iterator<T> begin() const
+    {
+        return Iterator<T>(size_, items_);
+    }
 
     gguf_metadata_value_type type_;
     uint64_t size_;
     const uint8_t* items_;
-    const uint8_t* data_;
 };
 
 //--- GGUF
@@ -399,6 +466,8 @@ public:
     uint64_t getNumMetaData() const;
     const gguf_metadata_kv_t& getMetaData(uint64_t x) const;
     bool getMetaData(const gguf_metadata_kv_t*& metadata, const char8_t* key) const;
+    bool getMetaData(const gguf_metadata_kv_t*& metadata, gguf_metadata_value_type type, const char8_t* key) const;
+    bool getArrayMetaData(const gguf_metadata_kv_t*& metadata, gguf_metadata_value_type type, const char8_t* key) const;
     
     uint8_t getMetaDataU8(const gguf_metadata_kv_t& metadata) const;
     int8_t getMetaDataS8(const gguf_metadata_kv_t& metadata) const;

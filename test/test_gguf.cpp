@@ -2,6 +2,7 @@
 #include <vector>
 #include <random>
 #include "gguf.h"
+#include "cppgpt.h"
 
 TEST_CASE("Load GGUF" "[GGUF]")
 {
@@ -11,3 +12,27 @@ TEST_CASE("Load GGUF" "[GGUF]")
 	gguf::Error result = gguf.load(u8"./data/gpt2.Q8_0.gguf");
 	CHECK(gguf::Error::Success == result);
 }
+
+TEST_CASE("Load Vocab" "[GGUF]")
+{
+	using namespace gguf;
+	using namespace cppgpt;
+	GGUF gguf;
+	gguf::Error result = gguf.load(u8"./data/gpt2.Q8_0.gguf");
+	CHECK(gguf::Error::Success == result);
+	Tokens tokens(gguf);
+	for(auto&& itr=tokens.getTokens().begin<GGUFString>(); itr; ++itr){
+		GGUFString ggufStr = *itr;
+		CHECK(ggufStr.length_<512);
+		bool result;
+		u32 token;
+		result = tokens.encode(token, ggufStr.length_, ggufStr.str_);
+		CHECK(result);
+		char8_t decoded[512];
+		result = tokens.decode(decoded, token);
+		CHECK(result);
+		u64 len = (std::min)(511ULL, ggufStr.length_);
+		CHECK(0 == ::strncmp((const char*)ggufStr.str_, (const char*)decoded, len));
+	}
+}
+

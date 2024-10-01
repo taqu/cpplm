@@ -317,89 +317,6 @@ uint64_t align_offset(uint64_t offset, uint32_t alignment)
     return offset + (alignment - (offset % alignment)) % alignment;
 }
 
-//--- GGUFArray
-//------------------------------------------------------------
-uint8_t GGUFArray::getU8(uint64_t index) const
-{
-    assert(gguf_metadata_value_type::GGUF_METADATA_VALUE_TYPE_UINT8 == type_);
-    assert(index<size_);
-    return items_[index];
-}
-
-int8_t GGUFArray::getS8(uint64_t index) const
-{
-    assert(gguf_metadata_value_type::GGUF_METADATA_VALUE_TYPE_UINT8 == type_);
-    assert(index<size_);
-    return reinterpret_cast<const int8_t*>(items_)[index];
-}
-
-uint16_t GGUFArray::getU16(uint64_t index) const
-{
-    assert(gguf_metadata_value_type::GGUF_METADATA_VALUE_TYPE_UINT8 == type_);
-    assert(index<size_);
-    return reinterpret_cast<const uint16_t*>(items_)[index];
-}
-
-int16_t GGUFArray::getS16(uint64_t index) const
-{
-    assert(gguf_metadata_value_type::GGUF_METADATA_VALUE_TYPE_UINT8 == type_);
-    assert(index<size_);
-    return reinterpret_cast<const int16_t*>(items_)[index];
-}
-
-uint32_t GGUFArray::getU32(uint64_t index) const
-{
-    assert(gguf_metadata_value_type::GGUF_METADATA_VALUE_TYPE_UINT8 == type_);
-    assert(index<size_);
-    return reinterpret_cast<const uint32_t*>(items_)[index];
-}
-
-int32_t GGUFArray::getS32(uint64_t index) const
-{
-    assert(gguf_metadata_value_type::GGUF_METADATA_VALUE_TYPE_UINT8 == type_);
-    assert(index<size_);
-    return reinterpret_cast<const int32_t*>(items_)[index];
-}
-
-uint64_t GGUFArray::getU64(uint64_t index) const
-{
-    assert(gguf_metadata_value_type::GGUF_METADATA_VALUE_TYPE_UINT8 == type_);
-    assert(index<size_);
-    return reinterpret_cast<const uint64_t*>(items_)[index];
-}
-
-int64_t GGUFArray::getS64(uint64_t index) const
-{
-    assert(gguf_metadata_value_type::GGUF_METADATA_VALUE_TYPE_UINT8 == type_);
-    assert(index<size_);
-    return reinterpret_cast<const int64_t*>(items_)[index];
-}
-
-float GGUFArray::getF32(uint64_t index) const
-{
-    assert(gguf_metadata_value_type::GGUF_METADATA_VALUE_TYPE_UINT8 == type_);
-    assert(index<size_);
-    return reinterpret_cast<const float*>(items_)[index];
-}
-
-double GGUFArray::getF64(uint64_t index) const
-{
-    assert(gguf_metadata_value_type::GGUF_METADATA_VALUE_TYPE_UINT8 == type_);
-    assert(index<size_);
-    return reinterpret_cast<const double*>(items_)[index];
-}
-
-GGUFString GGUFArray::getString(uint64_t index) const
-{
-    assert(gguf_metadata_value_type::GGUF_METADATA_VALUE_TYPE_UINT8 == type_);
-    assert(index<size_);
-    gguf_string_t s = reinterpret_cast<const gguf_string_t*>(items_)[index];
-    GGUFString string;
-    string.length_ = s.length_;
-    string.str_ = reinterpret_cast<const char8_t*>(&data_[s.offset_]);
-    return string;
-}
-
 //--- GGUF
 //------------------------------------------------------------
 GGUF::GGUF()
@@ -738,6 +655,48 @@ bool GGUF::getMetaData(const gguf_metadata_kv_t*& metadata, const char8_t* key) 
     return false;
 }
 
+bool GGUF::getMetaData(const gguf_metadata_kv_t*& metadata, gguf_metadata_value_type type, const char8_t* key) const
+{
+    assert(nullptr != key);
+    uint64_t len = ::strlen((const char*)key);
+    uint64_t hash = get_hash(len, key);
+    for(uint64_t i = 0; i < metadata_.size(); ++i) {
+        if(hash == metadata_[i].hash_
+           && len == metadata_[i].key_.length_
+           && type == metadata_[i].value_type_) {
+            const char* str = reinterpret_cast<const char*>(&data_[metadata_[i].key_.offset_]);
+            if(0 == ::strncmp(str, reinterpret_cast<const char*>(key), len)) {
+                metadata = &metadata_[i];
+                return true;
+            }
+        }
+    }
+    metadata = nullptr;
+    return false;
+}
+
+bool GGUF::getArrayMetaData(const gguf_metadata_kv_t*& metadata, gguf_metadata_value_type type, const char8_t* key) const
+{
+    assert(nullptr != key);
+    uint64_t len = ::strlen((const char*)key);
+    uint64_t hash = get_hash(len, key);
+    for(uint64_t i = 0; i < metadata_.size(); ++i) {
+        const gguf_metadata_kv_t& tmp = metadata_[i];
+        if(hash == tmp.hash_
+           && len == tmp.key_.length_
+           && gguf_metadata_value_type::GGUF_METADATA_VALUE_TYPE_ARRAY == tmp.value_type_
+           && type == tmp.value_.array_.type_) {
+            const char* str = reinterpret_cast<const char*>(&data_[tmp.key_.offset_]);
+            if(0 == ::strncmp(str, reinterpret_cast<const char*>(key), len)) {
+                metadata = &metadata_[i];
+                return true;
+            }
+        }
+    }
+    metadata = nullptr;
+    return false;
+}
+
 uint8_t GGUF::getMetaDataU8(const gguf_metadata_kv_t& metadata) const
 {
     assert(validate(metadata));
@@ -833,7 +792,6 @@ GGUFArray GGUF::getMetaDataArray(const gguf_metadata_kv_t& metadata) const
     array.size_ = metadata.value_.array_.size_;
     array.type_ = metadata.value_.array_.type_;
     array.items_ = &data_[metadata.value_.array_.offset_];
-    array.data_ = data_;
     return array;
 }
 
