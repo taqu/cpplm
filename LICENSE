@@ -25,3 +25,9 @@ Portion of this software is copied from minchatgpt.cpp.
 minchatgpt.cpp is provided by MIT License.
 Copyright (c) 2023 Ian Gitonga (https://github.com/iangitonga/minchatgpt.cpp)
 See doc/minichat.cpp/LICENSE in detail.
+
+Portion of this software is copied from llama2.c.
+llama2.c is provided by MIT License.
+Copyright (c) 2023 Andrej (https://github.com/karpathy/llama2.c)
+See doc/llama2.c/LICENSE in detail.
+

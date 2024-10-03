@@ -97,6 +97,18 @@ FwdIt lower_bound(FwdIt first, FwdIt last, const T& val)
     return first;
 }
 
+//--- Random
+//-----------------------------------------------------------
+class Random
+{
+public:
+    Random();
+    ~Random();
+    u32 rand();
+    f32 frand();
+private:
+};
+
 //--- Array
 //-----------------------------------------------------------
 template<class T>
@@ -727,40 +739,8 @@ private:
     std::chrono::high_resolution_clock::time_point start_;
 };
 
-//--- Memory
-//-----------------------------------------------------------
-class Memory
-{
-public:
-    Memory();
-    explicit Memory(u64 size);
-    Memory(Memory&& other);
-    ~Memory();
-    Memory& operator=(Memory&& other);
-
-    u64 size() const
-    {
-        return size_;
-    }
-
-    template<class T>
-    operator const T*() const
-    {
-        return reinterpret_cast<const T*>(ptr_);
-    }
-
-    template<class T>
-    operator T*()
-    {
-        return reinterpret_cast<T*>(ptr_);
-    }
-
-private:
-    Memory(const Memory&) = delete;
-    Memory& operator=(const Memory&) = delete;
-    u64 size_;
-    void* ptr_;
-};
+struct Config;
+struct Context;
 
 //--- Tensor
 //-----------------------------------------------------------
@@ -836,39 +816,13 @@ namespace op
     Tensor gelu(const Tensor& input);
     void vec_add(u64 size, f32* dst, const f32* src0, const f32* src1);
     Tensor add(const Tensor& x0, const Tensor& x1);
+    Tensor affine_proj_2d(const Tensor& input, const Tensor& weight);
     Tensor affine_proj_2d(const Tensor& input, const Tensor& weight, const Tensor& bias);
+    void matmul(f32* dst,const f32* x, const f32* w, u64 n, u64 d);
+    void rmsnorm(u64 size, f32* dst, const f32* x, const f32* w, f32 epsilon);
 } // namespace op
 
 bool is_same_shape(const Tensor& x0, const Tensor& x1);
-
-//--- LayerNorm
-//-----------------------------------------------------------
-class LayerNorm
-{
-public:
-    LayerNorm();
-    LayerNorm(
-        ggml_type type,
-        u32 d_in,
-        u32 d_out,
-        void* weight,
-        void* bias);
-    ~LayerNorm();
-    LayerNorm(LayerNorm&& other);
-    LayerNorm& operator=(LayerNorm&& other);
-
-    Tensor forward(const Tensor& input);
-
-    inline s64 time() const
-    {
-        return duration_;
-    }
-
-private:
-    s64 duration_;
-    Tensor weight_;
-    Tensor bias_;
-};
 
 //--- Embedding
 //-----------------------------------------------------------
@@ -925,27 +879,6 @@ private:
     Tensor weight_;
 };
 
-//--- GELU
-//-----------------------------------------------------------
-class GELU
-{
-public:
-    GELU();
-    ~GELU();
-    GELU(GELU&& other);
-    GELU& operator=(GELU&& other);
-
-    Tensor forward(const Tensor& input);
-
-    inline s64 time() const
-    {
-        return duration_;
-    }
-
-private:
-    s64 duration_;
-};
-
 //--- Residual
 //-----------------------------------------------------------
 class Residual
@@ -953,108 +886,14 @@ class Residual
 public:
     Residual();
     ~Residual();
-    Residual(Residual&& other);
-    Residual& operator=(Residual&& other);
 
-    Tensor forward(const Tensor& input0, const Tensor& input1);
-
+    void forward(Tensor& dst, const Tensor& src0, const Tensor& src1);
     inline s64 time() const
     {
         return duration_;
     }
-
 private:
     s64 duration_;
-};
-
-//--- Linear
-//-----------------------------------------------------------
-class Linear
-{
-public:
-    Linear();
-    Linear(ggml_type type, u64 d_in, u64 d_out, void* weight, void* bias);
-    ~Linear();
-    Linear(Linear&& other);
-    Linear& operator=(Linear&& other);
-
-    Tensor forward(const Tensor& input);
-
-    inline s64 time() const
-    {
-        return duration_;
-    }
-
-private:
-    s64 duration_;
-    Tensor weight_;
-    Tensor bias_;
-};
-
-//--- MultiHeadSelfAttn
-//-----------------------------------------------------------
-class MultiHeadSelfAttn
-{
-public:
-    MultiHeadSelfAttn();
-    MultiHeadSelfAttn(
-        ggml_type type,
-        u64 n_heads,
-        u64 n_embed,
-        void* query_w,
-        void* query_b,
-        void* key_w,
-        void* key_b,
-        void* value_w,
-        void* value_b,
-        void* qkv_proj_w,
-        void* qkv_proj_b);
-    ~MultiHeadSelfAttn();
-    MultiHeadSelfAttn(MultiHeadSelfAttn&& other);
-    MultiHeadSelfAttn& operator=(MultiHeadSelfAttn&& other);
-
-    Tensor forward(const Tensor& input);
-
-    inline s64 time() const
-    {
-        return duration_;
-    }
-
-private:
-    Tensor masked_qkv_attn(const Tensor& q, const Tensor& k, const Tensor& v);
-
-    s64 duration_;
-    u64 n_heads_;
-    Linear query_;
-    Linear key_;
-    Linear value_;
-    Linear qkv_proj_;
-};
-
-class ResidualAttnBlock
-{
-public:
-    ResidualAttnBlock();
-    ~ResidualAttnBlock();
-    ResidualAttnBlock(ResidualAttnBlock&& other);
-    ResidualAttnBlock& operator=(ResidualAttnBlock&& other);
-
-    Tensor forward(const Tensor& input);
-    inline s64 time() const
-    {
-        return duration_;
-    }
-
-private:
-    s64 duration_;
-    LayerNorm attn_ln_;
-    MultiHeadSelfAttn attn_;
-    Residual inp_res_;
-    LayerNorm mlp_ln_;
-    Linear mlp_fc_;
-    GELU gelu_;
-    Linear mlp_proj_;
-    Residual attn_res_;
 };
 
 //--- RMSNorm
@@ -1062,13 +901,144 @@ private:
 class RMSNorm
 {
 public:
-    RMSNorm(ggml_type type, u32 dimensions, f32 epsilon = 1.0e-6);
-    virtual ~RMSNorm();
+    RMSNorm();
+    RMSNorm(Tensor&& weight, f32 epsilon = 1.0e-5);
+    ~RMSNorm();
+    RMSNorm(RMSNorm&& other);
+    RMSNorm& operator=(RMSNorm&& other);
 
+    void forward(Tensor& dst, const Tensor& src);
+    inline s64 time() const
+    {
+        return duration_;
+    }
 private:
+    RMSNorm(const RMSNorm& other) = delete;
+    RMSNorm& operator=(const RMSNorm& other) = delete;
+
     s64 duration_;
     f32 epsilon_;
     Tensor weight_;
+};
+
+//--- SelfAttention
+//-----------------------------------------------------------
+class SelfAttention
+{
+public:
+    SelfAttention();
+    SelfAttention(
+        Tensor&& query,
+        Tensor&& key,
+        Tensor&& value,
+        Tensor&& qkv);
+    ~SelfAttention();
+    SelfAttention(SelfAttention&& other);
+    SelfAttention& operator=(SelfAttention&& other);
+
+    void forward(
+        const Config& config,
+        u64 position,
+        u64 layer_offset,
+        Tensor& output,
+        Tensor& input,
+        Tensor& query,
+        Tensor& key_cache,
+        Tensor& value_cache,
+        Tensor& attention);
+
+    inline s64 time() const
+    {
+        return duration_;
+    }
+
+private:
+    SelfAttention(const SelfAttention&) = delete;
+    SelfAttention& operator=(const SelfAttention&) = delete;
+    s64 duration_;
+    Tensor query_;
+    Tensor key_;
+    Tensor value_;
+    Tensor qkv_proj_;
+};
+
+//--- FeedForwardSwiGLU
+//-----------------------------------------------------------
+class FeedForwardSwiGLU
+{
+public:
+    FeedForwardSwiGLU();
+    FeedForwardSwiGLU(
+        Tensor&& ffn_down,
+        Tensor&& ffn_gate,
+        Tensor&& ffn_up,
+        Tensor&& ffn_norm);
+    ~FeedForwardSwiGLU();
+    FeedForwardSwiGLU(FeedForwardSwiGLU&& other);
+    FeedForwardSwiGLU& operator=(FeedForwardSwiGLU&& other);
+
+    void forward(
+        const Config& config,
+        Tensor& output,
+        const Tensor& input,
+        Tensor& buffer0,
+        Tensor& buffer1);
+
+    inline s64 time() const
+    {
+        return duration_;
+    }
+
+private:
+    FeedForwardSwiGLU(const FeedForwardSwiGLU&) = delete;
+    FeedForwardSwiGLU& operator=(const FeedForwardSwiGLU&) = delete;
+    s64 duration_;
+    Tensor ffn_down_; // w2 of safetensor
+    Tensor ffn_gate_; // w1 of safetensor
+    Tensor ffn_up_; // w3 of safetensor
+    Tensor ffn_norm_;
+};
+
+//--- TransformerBlock
+//-----------------------------------------------------------
+class TransformerBlock
+{
+public:
+    TransformerBlock();
+    ~TransformerBlock();
+    TransformerBlock(TransformerBlock&& other);
+    TransformerBlock& operator=(TransformerBlock&& other);
+
+    void forward(
+        const Config& config,
+        u64 layer,
+        u64 position,
+        Tensor& output,
+        Tensor& input,
+        Tensor& query,
+    Tensor& key_cache,
+    Tensor& value_cache,
+        Tensor& attention,
+        Tensor& buffer0,
+        Tensor& buffer1,
+        Tensor& hbuffer0,
+        Tensor& hbuffer1);
+
+    inline s64 time() const
+    {
+        return duration_;
+    }
+
+private:
+    TransformerBlock(const TransformerBlock&) = delete;
+    TransformerBlock& operator=(const TransformerBlock&) = delete;
+    s64 duration_;
+    RMSNorm attn_rmsnorm_;
+    SelfAttention attn_;
+    Residual attn_residual_;
+    RMSNorm ff_rmsnorm_;
+    FeedForwardSwiGLU ff_;
+    Residual ff_residual_;
 };
 
 //--- String
@@ -1125,6 +1095,7 @@ public:
     u32 getUnknown() const;
     u32 getSeparator() const;
     u32 getPadding() const;
+    u32 getMaxTokenLength() const;
 
     bool encode(u32& token, const char8_t* str) const;
     bool encode(u32& token, u64 length, const char8_t* str) const;
@@ -1144,59 +1115,93 @@ private:
     u32 unknown_token_id_;
     u32 separator_token_id_;
     u32 padding_token_id_;
+    u32 max_token_length_;
     HashMap<String, u32> tokenToId_;
     HashMap<u32, String> idToToken_;
 };
 
 //--- Tokenizer
 //-----------------------------------------------------------
-class GPT2TokenizerRef
+class Tokenizer
 {
 public:
-    struct String
-    {
-        u64 len_;
-        const char8_t* str_;
-    };
-
-    GPT2TokenizerRef();
-    GPT2TokenizerRef(const gguf::GGUF& model_data);
-    ~GPT2TokenizerRef();
-    GPT2TokenizerRef(GPT2TokenizerRef&& other);
-    GPT2TokenizerRef& operator=(GPT2TokenizerRef&& other);
-    String decode(int32_t token_id) const;
-    Array<uint32_t> encode(const Array<char8_t>& text) const;
+    Tokenizer();
+    Tokenizer(const gguf::GGUF& model_data);
+    ~Tokenizer();
+    Tokenizer(Tokenizer&& other);
+    Tokenizer& operator=(Tokenizer&& other);
+    String decode(u32 token) const;
+    Array<u32> encode(u32 size, const char8_t* text, bool bos, bool eos) const;
 
 private:
-    GPT2TokenizerRef(const GPT2TokenizerRef&) = delete;
-    GPT2TokenizerRef& operator=(const GPT2TokenizerRef&) = delete;
+    Tokenizer(const Tokenizer&) = delete;
+    Tokenizer& operator=(const Tokenizer&) = delete;
 
     static const char8_t* Pattern;
-    u32 size_;
-    HashMap<String, u32> tokenToId_;
-    HashMap<u32, String> idToToken_;
+    char8_t* buffer_;
+    Tokens tokens_;
 };
 
-//--- Model
+//--- Sampler
 //-----------------------------------------------------------
-class Model
+class Sampler
 {
 public:
-protected:
-    Model();
-    virtual ~Model();
+    Sampler();
+    ~Sampler();
+    Sampler(Sampler&& other);
+    Sampler& operator=(Sampler&& other);
 
+    u32 sample(f32* logits);
 private:
-    Model(const Model&) = delete;
-    Model& operator=(const Model&) = delete;
+    Sampler(const Sampler&) = delete;
+    Sampler& operator=(const Sampler&) = delete;
+    struct ProbIndex
+    {
+        f32 prob_;
+        u32 index_;
+    };
+
+    static u32 sample_argmax(u32 size, const f32* probabilities);
+    static u32 sample_mult(u32 size, f32 coin, const f32* probabilities);
+    static u32 sample_topp(u32 size, f32 topp, f32 coin, ProbIndex* probindex, const f32* probabilities);
+    u32 vocab_size_;
+    f32 temperature_;
+    f32 topp_;
+    Random random_;
+    ProbIndex* probindex_;
+};
+
+struct Config
+{
+    u64 dimension_;
+    u64 hidden_dim_;
+    u64 num_layers_;
+    u64 num_heads_;
+    u64 num_kv_heads_;
+    u64 vocab_size_;
+    u64 sequence_length_;
+};
+
+struct Context
+{
+    Tensor x_; // activation at current time stamp
+    Tensor xb_; // activation, but inside a resdual branch
+    Tensor xb2_; // additional buffer
+    Tensor hb_; // buffer for hidden dimension in the ffn
+    Tensor hb2_; // buffer for hidden dimension in the ffn
+    Tensor query_; // query
+    Tensor attn_; // buffer for scores/attention values
+    Tensor logits_; // output logits
+    Tensor key_cache_;
+    Tensor value_cache_;
 };
 
 //--- Llama2
 //-----------------------------------------------------------
-class Llama2: public virtual Model
+class Llama2
 {
 public:
-protected:
     /*
     llama_configs = {
     "7B": dict(n_layer=32, n_head=32, n_embd=4096),
@@ -1205,16 +1210,6 @@ protected:
     "65B": dict(n_layer=80, n_head=64, n_embd=8192),
 }
     */
-    struct Config
-    {
-        uint32_t block_size_ = 2048;
-        uint32_t vocab_size_ = 32000;
-        uint32_t padding_vocab_size_ = 0;
-        uint32_t n_layer_ = 32;
-        uint32_t n_head_ = 32;
-        uint32_t n_embd_ = 4096;
-    };
-
     Llama2();
     explicit Llama2(const Config& config);
     Llama2(Llama2&& other);
@@ -1224,7 +1219,15 @@ protected:
 private:
     Llama2(const Llama2&) = delete;
     Llama2& operator=(const Llama2&) = delete;
+    void forward(u32 token, u32 position);
+
     Config config_;
+    GPT2TokenizerRef tokenize_;
+    Sampler sampler_;
+    Context context_;
+    TransformerBlock* blocks_;
+    RMSNorm output_rmsnorm_;
+    Tensor output_weight_;
 };
 } // namespace cppgpt
 #endif // INC_CPPGPT_H_

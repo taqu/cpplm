@@ -1106,46 +1106,6 @@ Timer::~Timer()
     duration_ = std::chrono::duration_cast<std::chrono::milliseconds>(duration).count();
 }
 
-//--- Memory
-//-----------------------------------------------------------
-Memory::Memory()
-    : size_(0)
-    , ptr_(nullptr)
-{
-}
-
-Memory::Memory(Memory&& other)
-    : size_(other.size_)
-    , ptr_(other.ptr_)
-{
-    other.size_ = 0;
-    other.ptr_ = nullptr;
-}
-
-Memory::Memory(u64 size)
-    : size_(size)
-    , ptr_(nullptr)
-{
-}
-
-Memory::~Memory()
-{
-    deallocate(ptr_);
-    ptr_ = nullptr;
-}
-
-Memory& Memory::operator=(Memory&& other)
-{
-    if(this != &other) {
-        deallocate(ptr_);
-        size_ = other.size_;
-        ptr_ = other.ptr_;
-        other.size_ = 0;
-        other.ptr_ = nullptr;
-    }
-    return *this;
-}
-
 //--- Tensor
 //-----------------------------------------------------------
 namespace
@@ -1769,6 +1729,24 @@ namespace op
         return result;
     }
 
+    Tensor affine_proj_2d(const Tensor& input, const Tensor& weight)
+    {
+        const u64 nrows0 = input.size(0);
+        const u64 ncols = input.size(1);
+        const u64 nrows1 = weight.size(0);
+
+        Tensor result(ggml_type::GGML_TYPE_F32, {nrows0, nrows1});
+        for(u64 r0 = 0; r0 < nrows0; ++r0) {
+            for(u64 r1 = 0; r1 < nrows1; ++r1) {
+                const f32* row0 = input.data<f32>() + r0 * ncols;
+                const f32* row1 = weight.data<f32>() + r1 * ncols;
+                f32 a = dot_product(ncols, row0, row1);
+                result.data<f32>()[r0 * nrows1 + r1] = a;
+            }
+        }
+        return result;
+    }
+
     Tensor affine_proj_2d(const Tensor& input, const Tensor& weight, const Tensor& bias)
     {
         const u64 nrows0 = input.size(0);
@@ -1858,7 +1836,7 @@ namespace op
                 } // for(u64 i
 
             } // for(u64 qrow
-        } // for(u64 h
+        }     // for(u64 h
     }
 
     void qkv_attn_matmul(Tensor& qkv, const Tensor& qk, const Tensor& v, u64 n_heads)
@@ -1882,61 +1860,61 @@ namespace op
                     u64 qkv_i = h * d_head + qkrow * d_embed + vcol;
                     qkv.data<f32>()[qkv_i] = dot;
                 } // for(u64 vcol
-            } // for(u64 qkrow
-        } // for(u64 h
+            }     // for(u64 qkrow
+        }         // for(u64 h
+    }
+
+    void matmul(f32* dst, const f32* x, const f32* w, u64 n, u64 d)
+    {
+        for(u64 i = 0; i < d; ++i) {
+            f32 value = 0.0f;
+            for(u64 j = 0; j < n; ++j) {
+                value += w[i * n + j] * x[j];
+            }
+            dst[i] = value;
+        }
+    }
+
+    void rmsnorm(u64 size, f32* dst, const f32* x, const f32* w, f32 epsilon)
+    {
+        // calculate sum of squares
+        f32 ss = 0.0f;
+        for(u64 i = 0; i < size; ++i) {
+            ss += x[i] * x[i];
+        }
+        ss /= size;
+        ss += epsilon;
+        ss = 1.0f / ::sqrtf(ss);
+        // normalize and scale
+        for(u64 i = 0; i < size; ++i) {
+            dst[i] = w[i] * (ss * x[i]);
+        }
+    }
+
+    void softmax(u64 size, f32* x)
+    {
+        assert(0 < size);
+        // find max value (for numerical stability)
+        f32 max_value = x[0];
+        for(u64 i = 1; i < size; ++i) {
+            if(max_value < x[i]) {
+                max_value = x[i];
+            }
+        }
+        // exp and sum
+        f32 sum = 0.0f;
+        for(u64 i = 0; i < size; ++i) {
+            x[i] = ::expf(x[i] - max_value);
+            sum += x[i];
+        }
+        // normalize
+        f32 inv_sum = 1.0f / sum;
+        for(u64 i = 0; i < size; ++i) {
+            x[i] *= inv_sum;
+        }
     }
 
 } // namespace op
-
-//--- LayerNorm
-//-----------------------------------------------------------
-LayerNorm::LayerNorm()
-    : duration_(0)
-{
-}
-
-LayerNorm::LayerNorm(
-    ggml_type type,
-    u32 d_in,
-    u32 d_out,
-    void* weight,
-    void* bias)
-    : duration_(0)
-    , weight_(type, {d_out, d_in}, weight)
-    , bias_(type, {d_out}, bias)
-{
-}
-
-LayerNorm::~LayerNorm()
-{
-}
-
-LayerNorm::LayerNorm(LayerNorm&& other)
-    : duration_(0)
-    , weight_(std::move(other.weight_))
-    , bias_(std::move(other.bias_))
-{
-}
-
-LayerNorm& LayerNorm::operator=(LayerNorm&& other)
-{
-    if(this != &other) {
-        duration_ = 0;
-        weight_ = std::move(other.weight_);
-        bias_ = std::move(bias_);
-    }
-    return *this;
-}
-
-Tensor LayerNorm::forward(const Tensor& input)
-{
-    assert(weight_.size(0) == input.size(1));
-    Timer timer(duration_);
-
-    Tensor weight = op::convertF32(weight_);
-    Tensor bias = op::convertF32(bias_);
-    return op::normalize(input, weight, bias);
-}
 
 //--- Embedding
 //-----------------------------------------------------------
@@ -2043,34 +2021,6 @@ Tensor PositionalEmbedding::forward(u64 num_context)
     return result;
 }
 
-//--- GELU
-//-----------------------------------------------------------
-GELU::GELU()
-    : duration_(0)
-{
-}
-
-GELU::~GELU()
-{
-}
-
-GELU::GELU(GELU&& /*other*/)
-    : duration_(0)
-{
-}
-
-GELU& GELU::operator=(GELU&& /*other*/)
-{
-    duration_ = 0;
-    return *this;
-}
-
-Tensor GELU::forward(const Tensor& input)
-{
-    Timer timer(duration_);
-    return op::gelu(input);
-}
-
 //--- Residual
 //-----------------------------------------------------------
 Residual::Residual()
@@ -2082,234 +2032,323 @@ Residual::~Residual()
 {
 }
 
-Residual::Residual(Residual&& /*other*/)
-    : duration_(0)
+void Residual::forward(Tensor& dst, const Tensor& src0, const Tensor& src1)
 {
-}
-
-Residual& Residual::operator=(Residual&& /*other*/)
-{
-    duration_ = 0;
-    return *this;
-}
-
-Tensor Residual::forward(const Tensor& input0, const Tensor& input1)
-{
-    assert(input0.type() == input1.type());
-    assert(input0.num_dims() == 2);
-    assert(input1.num_dims() == 2);
-    assert(is_same_shape(input0, input1));
     Timer timer(duration_);
-    return op::add(input0, input1);
-}
-
-//--- Linear
-//-----------------------------------------------------------
-Linear::Linear()
-    : duration_(0)
-{
-}
-
-Linear::Linear(ggml_type type, u64 d_in, u64 d_out, void* weight, void* bias)
-    : duration_(0)
-    , weight_(type, {d_out, d_in}, weight)
-    , bias_(type, {d_out}, bias)
-{
-}
-
-Linear::~Linear()
-{
-}
-
-Linear::Linear(Linear&& other)
-    : duration_(0)
-    , weight_(std::move(other.weight_))
-    , bias_(std::move(other.bias_))
-{
-}
-
-Linear& Linear::operator=(Linear&& other)
-{
-    if(this != &other) {
-        duration_ = 0;
-        weight_ = std::move(other.weight_);
-        bias_ = std::move(other.bias_);
+    f32* d = dst.data<f32>();
+    const f32* s0 = src0.data<f32>();
+    const f32* s1 = src1.data<f32>();
+    for(u64 i = 0; i < src0.size(0); ++i) {
+        d[i] = s0[i] + s1[i];
     }
-    return *this;
-}
-
-Tensor Linear::forward(const Tensor& input)
-{
-    assert(2 == input.num_dims());
-    assert(input.size(1) == weight_.size(1));
-    Timer timer(duration_);
-    Tensor weight = op::convertF32(weight_);
-    Tensor bias = op::convertF32(bias_);
-    return op::affine_proj_2d(input, weight, bias);
-}
-
-//--- MultiHeadSelfAttn
-//-----------------------------------------------------------
-MultiHeadSelfAttn::MultiHeadSelfAttn()
-    : duration_(0)
-    , n_heads_(0)
-{
-}
-
-MultiHeadSelfAttn::MultiHeadSelfAttn(
-    ggml_type type,
-    u64 n_heads,
-    u64 n_embed,
-    void* query_w,
-    void* query_b,
-    void* key_w,
-    void* key_b,
-    void* value_w,
-    void* value_b,
-    void* qkv_proj_w,
-    void* qkv_proj_b)
-    : duration_(0)
-    , n_heads_(n_heads)
-    , query_(type, n_embed, n_embed, query_w, query_b)
-    , key_(type, n_embed, n_embed, key_w, key_b)
-    , value_(type, n_embed, n_embed, value_w, value_b)
-    , qkv_proj_(type, n_embed, n_embed, qkv_proj_w, qkv_proj_b)
-{
-}
-
-MultiHeadSelfAttn::~MultiHeadSelfAttn()
-{
-}
-
-MultiHeadSelfAttn::MultiHeadSelfAttn(MultiHeadSelfAttn&& other)
-    : duration_(0)
-    , n_heads_(other.n_heads_)
-    , query_(std::move(other.query_))
-    , key_(std::move(other.key_))
-    , value_(std::move(other.value_))
-    , qkv_proj_(std::move(other.qkv_proj_))
-{
-}
-
-MultiHeadSelfAttn& MultiHeadSelfAttn::operator=(MultiHeadSelfAttn&& other)
-{
-    if(this != &other) {
-        duration_ = 0;
-        n_heads_ = other.n_heads_;
-        query_ = std::move(other.query_);
-        key_ = std::move(other.key_);
-        value_ = std::move(other.value_);
-        qkv_proj_ = std::move(other.qkv_proj_);
-
-        other.n_heads_ = 0;
-    }
-    return *this;
-}
-
-Tensor MultiHeadSelfAttn::forward(const Tensor& input)
-{
-    assert(2 == input.num_dims());
-    Timer timer(duration_);
-
-    Tensor q = query_.forward(input);
-    Tensor k = key_.forward(input);
-    Tensor v = value_.forward(input);
-
-    Tensor qkv = masked_qkv_attn(q, k, v);
-    Tensor out = qkv_proj_.forward(qkv);
-    return out;
-}
-
-Tensor MultiHeadSelfAttn::masked_qkv_attn(const Tensor& q, const Tensor& k, const Tensor& v)
-{
-    const u64 n_ctx = q.size(0);
-    const u64 d_embed = q.size(1);
-    Tensor qkv(ggml_type::GGML_TYPE_F32, {n_ctx, d_embed});
-
-    Tensor qk = op::qk_masked_attn_matmul(q, k, n_heads_);
-    op::qk_softmax(qk, n_heads_);
-    op::qkv_attn_matmul(qkv, v, qk, n_heads_);
-
-    return qkv;
-}
-
-//--- ResidualAttnBlock
-//-----------------------------------------------------------
-ResidualAttnBlock::ResidualAttnBlock()
-    : duration_(0)
-{
-}
-
-// ResidualAttnBlock::ResidualAttnBlock(ggml_type type, u64 n_attn_heads, u64 d_embed, u64 d_mlp, u64 max_ctx)
-//     : attn_ln_(type, max_ctx, d_embed,LayerNorm(max_ctx, d_embed)},
-//       attn{MultiHeadSelfAttn(n_attn_heads, d_embed, max_ctx)},
-//       inp_res{Residual(max_ctx, d_embed)},
-//       mlp_ln{LayerNorm(max_ctx, d_embed)},
-//       mlp_fc{Linear(d_embed, d_mlp, max_ctx)},
-//       gelu{GELU(max_ctx, d_mlp, /*cache_ctx_acv=*/true)},
-//       mlp_proj{Linear(d_mlp, d_embed, max_ctx)},
-//       attn_res{Residual(max_ctx, d_embed)}
-//{
-// }
-
-ResidualAttnBlock::~ResidualAttnBlock()
-{
-}
-
-ResidualAttnBlock::ResidualAttnBlock(ResidualAttnBlock&& other)
-    : duration_(0)
-    , attn_ln_(std::move(other.attn_ln_))
-    , attn_(std::move(other.attn_))
-    , inp_res_(std::move(other.inp_res_))
-    , mlp_ln_(std::move(other.mlp_ln_))
-    , mlp_fc_(std::move(other.mlp_fc_))
-    , gelu_(std::move(other.gelu_))
-    , mlp_proj_(std::move(other.mlp_proj_))
-    , attn_res_(std::move(other.attn_res_))
-{
-}
-
-ResidualAttnBlock& ResidualAttnBlock::operator=(ResidualAttnBlock&& other)
-{
-    if(this != &other) {
-        duration_ = 0;
-        attn_ln_ = std::move(other.attn_ln_);
-        attn_ = std::move(other.attn_);
-        inp_res_ = std::move(other.inp_res_);
-        mlp_ln_ = std::move(other.mlp_ln_);
-        mlp_fc_ = std::move(other.mlp_fc_);
-        gelu_ = std::move(other.gelu_);
-        mlp_proj_ = std::move(other.mlp_proj_);
-        attn_res_ = std::move(other.attn_res_);
-    }
-    return *this;
-}
-
-Tensor ResidualAttnBlock::forward(const Tensor& input)
-{
-    Timer timer(duration_);
-    Tensor attn_ln_out = attn_ln_.forward(input);
-    Tensor attn_out = attn_.forward(attn_ln_out);
-    Tensor inp_res_out = inp_res_.forward(input, attn_out);
-    Tensor mlp_ln_out = mlp_ln_.forward(inp_res_out);
-    Tensor mlp_fc_out = mlp_fc_.forward(mlp_ln_out);
-    Tensor gelu_out = gelu_.forward(mlp_fc_out);
-    Tensor mlp_proj_out = mlp_proj_.forward(gelu_out);
-    Tensor result = attn_res_.forward(inp_res_out, mlp_proj_out);
-    return result;
 }
 
 //--- RMSNorm
 //-----------------------------------------------------------
-RMSNorm::RMSNorm(ggml_type type, u32 dimensions, f32 epsilon)
+RMSNorm::RMSNorm()
+    : duration_(0)
+    , epsilon_(0.0f)
+{
+}
+
+RMSNorm::RMSNorm(Tensor&& weight, f32 epsilon)
     : duration_(0)
     , epsilon_(epsilon)
-    , weight_(type, {dimensions})
+    , weight_(std::move(weight))
 {
 }
 
 RMSNorm::~RMSNorm()
 {
+}
+
+void RMSNorm::forward(Tensor& dst, const Tensor& src)
+{
+    Timer timer(duration_);
+    Tensor weight = op::convertF32(weight_);
+    op::rmsnorm(weight.size(0), dst.data<f32>(), src.data<f32>(), weight.data<f32>(), epsilon_);
+}
+
+RMSNorm::RMSNorm(RMSNorm&& other)
+    : duration_(0)
+    , epsilon_(other.epsilon_)
+    , weight_(std::move(other.weight_))
+{
+}
+
+RMSNorm& RMSNorm::operator=(RMSNorm&& other)
+{
+    if(this != &other) {
+        duration_ = 0;
+        epsilon_ = other.epsilon_;
+        weight_ = std::move(other.weight_);
+    }
+    return *this;
+}
+
+//--- SelfAttention
+//-----------------------------------------------------------
+SelfAttention::SelfAttention()
+    : duration_(0)
+{
+}
+
+SelfAttention::SelfAttention(
+    Tensor&& query,
+    Tensor&& key,
+    Tensor&& value,
+    Tensor&& qkv)
+    : duration_(0)
+    , query_(std::move(query))
+    , key_(std::move(key))
+    , value_(std::move(value))
+    , qkv_proj_(std::move(qkv))
+{
+}
+
+SelfAttention::~SelfAttention()
+{
+}
+
+SelfAttention::SelfAttention(SelfAttention&& other)
+    : duration_(0)
+    , query_(std::move(other.query_))
+    , key_(std::move(other.key_))
+    , value_(std::move(other.value_))
+    , qkv_proj_(std::move(other.qkv_proj_))
+
+{
+}
+
+SelfAttention& SelfAttention::operator=(SelfAttention&& other)
+{
+    if(this != &other) {
+        duration_ = 0;
+        query_ = std::move(other.query_);
+        key_ = std::move(other.key_);
+        value_ = std::move(other.value_);
+        qkv_proj_ = std::move(other.qkv_proj_);
+    }
+    return *this;
+}
+
+void SelfAttention::forward(
+    const Config& config,
+    u64 position,
+    u64 layer_offset,
+    Tensor& output,
+    Tensor& input,
+    Tensor& query,
+    Tensor& key_cache,
+    Tensor& value_cache,
+    Tensor& attention)
+{
+    u64 dim = input.size(0);
+    u64 kv_dim = key_.size(1);
+    u64 n_heads = config.num_heads_;
+    u64 kv_mul = config.num_heads_ / config.num_kv_heads_;
+    u64 head_size = config.dimension_ / n_heads;
+    u64 cache_offset = layer_offset + position * kv_dim;
+    f32* q = query.data<f32>();
+    f32* k = key_cache.data<f32>() + cache_offset;
+    f32* v = value_cache.data<f32>() + cache_offset;
+
+    // qkv matmuls for the current position
+    {
+        Tensor wq = op::convertF32(query_);
+        op::matmul(q, input.data<f32>(), wq.data<f32>(), dim, dim);
+    }
+    {
+        Tensor wk = op::convertF32(key_);
+        op::matmul(k, input.data<f32>(), wk.data<f32>(), dim, kv_dim);
+    }
+    {
+        Tensor wv = op::convertF32(key_);
+        op::matmul(v, input.data<f32>(), wv.data<f32>(), dim, kv_dim);
+    }
+    // RoPE relative positional encoding: complex-valued rotate q and k in each head
+    {
+        for(u64 i = 0; i < dim; i += 2) {
+            u64 head_dim = i % head_size;
+            f32 freq = 1.0f / ::powf(10000.0f, head_dim / (f32)head_size);
+            f32 value = position * freq;
+            f32 fcr = ::cosf(value);
+            f32 fci = ::sinf(value);
+            u32 rotn = i < kv_dim ? 2 : 1;
+            for(u32 v = 0; v < rotn; ++v) {
+                f32* vec = (0 == v) ? q : k;
+                f32 v0 = vec[i + 0];
+                f32 v1 = vec[i + 1];
+                vec[i + 0] = v0 * fcr - v1 * fci;
+                vec[i + 1] = v0 * fci + v1 * fcr;
+            }
+        }
+    }
+    // multihead attention. iterate over all heads
+    {
+        ::memset(input.data<f32>(), 0, n_heads*head_size*sizeof(f32));
+        f32 inv_head_size = 1.0f / ::sqrtf(head_size);
+        for(u64 h = 0; h < n_heads; ++h) {
+            const f32* tq = q + h * head_size;                               // query vector for this head
+            f32* attn = attention.data<f32>() + h * config.sequence_length_; // attention scores for this head
+            // iterate over all timesteps, including the current step
+            for(u64 t = 0; t <= position; ++t) {
+                f32* tk = k + layer_offset + t * kv_dim + (h / kv_mul) * head_size; // key vector for this head and at this timestep
+                // calcurate the attention score as the dot product of q and k
+                f32 score = 0.0f;
+                for(u64 i = 0; i < head_size; ++i) {
+                    score += q[i] * tk[i];
+                }
+                score *= inv_head_size;
+                attn[t] = score;
+            }
+
+            // softmax the scores to get attention weights, from 0..pos inclusively
+            op::softmax(position + 1, attn);
+
+            // weighted sum of the values, store back to the current tensor
+            f32* xb = input.data<f32>() + h * head_size;
+            for(u64 t = 0; t <= position; ++t) {
+                f32* v = value_cache.data<f32>() + layer_offset + t * kv_dim + (h / kv_mul) * head_size;
+                f32 a = attn[t];
+                // accumulate the weighted value
+                for(u64 i = 0; i < head_size; ++i) {
+                    xb[i] += a * v[i];
+                }
+            }
+        } // for(u64 h
+    }
+
+    // final matmul to get the output of the attention
+    {
+        Tensor wo = op::convertF32(qkv_proj_);
+        op::matmul(output.data<f32>(), input.data<f32>(), wo.data<f32>(), dim, dim);
+    }
+}
+
+//--- FeedForwardSwiGLU
+//-----------------------------------------------------------
+FeedForwardSwiGLU::FeedForwardSwiGLU()
+    : duration_(0)
+{
+}
+
+FeedForwardSwiGLU::FeedForwardSwiGLU(
+    Tensor&& ffn_down,
+    Tensor&& ffn_gate,
+    Tensor&& ffn_up,
+    Tensor&& ffn_norm)
+    : duration_(0)
+    , ffn_down_(std::move(ffn_down))
+    , ffn_gate_(std::move(ffn_gate))
+    , ffn_up_(std::move(ffn_up))
+    , ffn_norm_(std::move(ffn_norm))
+{
+}
+FeedForwardSwiGLU::~FeedForwardSwiGLU()
+{
+}
+
+FeedForwardSwiGLU::FeedForwardSwiGLU(FeedForwardSwiGLU&& other)
+    : duration_(0)
+    , ffn_down_(std::move(other.ffn_down_))
+    , ffn_gate_(std::move(other.ffn_gate_))
+    , ffn_up_(std::move(other.ffn_up_))
+    , ffn_norm_(std::move(other.ffn_norm_))
+{
+}
+
+FeedForwardSwiGLU& FeedForwardSwiGLU::operator=(FeedForwardSwiGLU&& other)
+{
+    if(this != &other) {
+        duration_ = 0;
+        ffn_down_ = std::move(other.ffn_down_);
+        ffn_gate_ = std::move(other.ffn_gate_);
+        ffn_up_ = std::move(other.ffn_up_);
+        ffn_norm_ = std::move(other.ffn_norm_);
+    }
+    return *this;
+}
+
+void FeedForwardSwiGLU::forward(
+    const Config& config,
+    Tensor& output,
+    const Tensor& input,
+        Tensor& buffer0,
+    Tensor& buffer1)
+{
+    u64 dim = config.dimension_;
+    u32 hidden_dim = config.hidden_dim_;
+    op::matmul(buffer0.data<f32>(), input.data<f32>(), ffn_gate_.data<f32>(), dim, hidden_dim);
+    op::matmul(buffer1.data<f32>(), input.data<f32>(), ffn_up_.data<f32>(), dim, hidden_dim);
+
+    // SwiGLU non-linearity
+    for(u64 i = 0; i < hidden_dim; ++i) {
+        f32 value = buffer0.data<f32>()[i];
+        // silu(x) = x*σ(x) where σ(x) is thelogistic sigmoid
+        value *= (1.0f / (1.0f + ::expf(-value)));
+        value *= buffer1.data<f32>()[i];
+        buffer0.data<f32>()[i] = value;
+    }
+    op::matmul(output.data<f32>(), buffer0.data<f32>(), ffn_down_.data<f32>(), hidden_dim, dim);
+}
+
+//--- TransformerBlock
+//-----------------------------------------------------------
+    TransformerBlock::TransformerBlock()
+    :duration_(0)
+{
+}
+
+    TransformerBlock::~TransformerBlock()
+{
+}
+
+    TransformerBlock::TransformerBlock(TransformerBlock&& other)
+{
+}
+
+TransformerBlock& TransformerBlock::operator=(TransformerBlock&& other)
+{
+}
+
+void TransformerBlock::forward(
+    const Config& config,
+    u64 layer,
+    u64 position,
+    Tensor& output,
+    Tensor& input,
+    Tensor& query,
+    Tensor& key_cache,
+    Tensor& value_cache,
+    Tensor& attention,
+    Tensor& buffer0,
+    Tensor& buffer1,
+    Tensor& hbuffer0,
+        Tensor& hbuffer1)
+{
+    attn_rmsnorm_.forward(buffer0, input);
+    u64 kv_dim = (config.dimension_ * config.num_kv_heads_) / config.num_heads_;
+    u64 layer_offset = layer * config.sequence_length_ * kv_dim;
+    attn_.forward(
+        config,
+        position,
+        layer_offset,
+        buffer1,
+        buffer0,
+        query,
+        key_cache,
+        value_cache,
+        attention);
+    attn_residual_.forward(input, input, buffer1);
+    ff_rmsnorm_.forward(buffer0, input);
+    ff_.forward(
+        config,
+        buffer0,
+        buffer0,
+        hbuffer0,
+        hbuffer1);
+    ff_residual_.forward(output, input, buffer0);
 }
 
 //--- Tokens
@@ -2326,6 +2365,7 @@ Tokens::Tokens()
     , unknown_token_id_(0)
     , separator_token_id_(0)
     , padding_token_id_(0)
+    , max_token_length_(0)
 {
 }
 
@@ -2341,6 +2381,7 @@ Tokens::Tokens(const gguf::GGUF& model_data)
     , unknown_token_id_(0)
     , separator_token_id_(0)
     , padding_token_id_(0)
+    , max_token_length_(0)
 {
     using namespace gguf;
     const gguf_metadata_kv_t* metadata = nullptr;
@@ -2387,6 +2428,7 @@ Tokens::Tokens(const gguf::GGUF& model_data)
     for(GGUFArray::Iterator<GGUFString> itr = tokens_.begin<GGUFString>(); itr; ++itr, ++id) {
         GGUFString ggufStr = *itr;
         String str = {ggufStr.length_, ggufStr.str_};
+        max_token_length_ = (std::max)(max_token_length_, static_cast<u32>(ggufStr.length_));
         tokenToId_.add(str, id);
         idToToken_.add(id, str);
     }
@@ -2408,6 +2450,7 @@ Tokens::Tokens(Tokens&& other)
     , unknown_token_id_(other.unknown_token_id_)
     , separator_token_id_(other.separator_token_id_)
     , padding_token_id_(other.padding_token_id_)
+    , max_token_length_(other.max_token_length_)
     , tokenToId_(std::move(other.tokenToId_))
     , idToToken_(std::move(other.idToToken_))
 {
@@ -2422,6 +2465,7 @@ Tokens::Tokens(Tokens&& other)
     other.unknown_token_id_ = 0;
     other.separator_token_id_ = 0;
     other.padding_token_id_ = 0;
+    other.max_token_length_ = 0;
 }
 
 Tokens& Tokens::operator=(Tokens&& other)
@@ -2438,6 +2482,7 @@ Tokens& Tokens::operator=(Tokens&& other)
         unknown_token_id_ = other.unknown_token_id_;
         separator_token_id_ = other.separator_token_id_;
         padding_token_id_ = other.padding_token_id_;
+        max_token_length_ = other.max_token_length_;
         tokenToId_ = std::move(other.tokenToId_);
         idToToken_ = std::move(other.idToToken_);
 
@@ -2452,6 +2497,7 @@ Tokens& Tokens::operator=(Tokens&& other)
         other.unknown_token_id_ = 0;
         other.separator_token_id_ = 0;
         other.padding_token_id_ = 0;
+        other.max_token_length_ = 0;
     }
     return *this;
 }
@@ -2518,7 +2564,7 @@ bool Tokens::encode(u32& token, const char8_t* str) const
     key.len_ = ::strnlen(reinterpret_cast<const char*>(str), 128);
     key.str_ = str;
     const u32* id = nullptr;
-    if(tokenToId_.tryGet(key, id)){
+    if(tokenToId_.tryGet(key, id)) {
         token = *id;
         return true;
     }
@@ -2532,7 +2578,7 @@ bool Tokens::encode(u32& token, u64 length, const char8_t* str) const
     key.len_ = length;
     key.str_ = str;
     const u32* id = nullptr;
-    if(tokenToId_.tryGet(key, id)){
+    if(tokenToId_.tryGet(key, id)) {
         token = *id;
         return true;
     }
@@ -2542,7 +2588,7 @@ bool Tokens::encode(u32& token, u64 length, const char8_t* str) const
 bool Tokens::decode(char8_t str[512], u32 token) const
 {
     const String* value = nullptr;
-    if(idToToken_.tryGet(token, value)){
+    if(idToToken_.tryGet(token, value)) {
         u64 len = (std::min)(511ULL, value->len_);
         ::memcpy(str, value->str_, len);
         str[len] = u8'\0';
@@ -2553,10 +2599,10 @@ bool Tokens::decode(char8_t str[512], u32 token) const
 
 bool Tokens::decode(u64 length, char8_t str[], u32 token) const
 {
-    assert(0<length);
+    assert(0 < length);
     const String* value = nullptr;
-    if(idToToken_.tryGet(token, value)){
-        u64 len = (std::min)(length-1, value->len_);
+    if(idToToken_.tryGet(token, value)) {
+        u64 len = (std::min)(length - 1, value->len_);
         ::memcpy(str, value->str_, len);
         str[len] = u8'\0';
         return true;
@@ -2564,51 +2610,185 @@ bool Tokens::decode(u64 length, char8_t str[], u32 token) const
     return false;
 }
 
-//--- GPT2TokenizerRef
+//--- Tokenizer
 //-----------------------------------------------------------
-const char8_t* GPT2TokenizerRef::Pattern = u8R"('s|'t|'re|'ve|'m|'ll|'d| ?[[:alpha:]]+| ?[[:digit:]]+| ?[^\s[:alpha:][:digit:]]+|\s+(?!\S)|\s+)";
-GPT2TokenizerRef::GPT2TokenizerRef()
-    : size_(0)
+const char8_t* Tokenizer::Pattern = u8R"('s|'t|'re|'ve|'m|'ll|'d| ?[[:alpha:]]+| ?[[:digit:]]+| ?[^\s[:alpha:][:digit:]]+|\s+(?!\S)|\s+)";
+Tokenizer::Tokenizer()
+    :buffer_(nullptr)
 {
 }
 
-GPT2TokenizerRef::GPT2TokenizerRef(const gguf::GGUF& model_data)
-    : size_(0)
+Tokenizer::Tokenizer(const gguf::GGUF& model_data)
+    :buffer_(nullptr)
+    ,tokens_(model_data)
 {
+    buffer_ = (char8_t*)allocate((tokens_.getMaxTokenLength() + 1 + 2)*sizeof(char8_t));
 }
 
-GPT2TokenizerRef::~GPT2TokenizerRef()
+Tokenizer::~Tokenizer()
 {
+    deallocate(buffer_);
+    buffer_ = nullptr;
 }
 
-GPT2TokenizerRef::GPT2TokenizerRef(GPT2TokenizerRef&& other)
+Tokenizer::Tokenizer(Tokenizer&& other)
+    :tokens_(std::move(other.tokens_))
+    ,buffer_(other.buffer_)
 {
+    other.buffer_ = nullptr;
 }
 
-GPT2TokenizerRef& GPT2TokenizerRef::operator=(GPT2TokenizerRef&& other)
+Tokenizer& Tokenizer::operator=(Tokenizer&& other)
 {
+    if(this != &other){
+        deallocate(buffer_);
+        tokens_ = std::move(other.tokens_);
+        buffer_ = other.buffer_;
+
+        other.buffer_ = nullptr;
+    }
     return *this;
 }
 
-GPT2TokenizerRef::String GPT2TokenizerRef::decode(int32_t token_id) const
+String Tokenizer::decode(u32 token) const
 {
     return String{};
 }
 
-Array<uint32_t> GPT2TokenizerRef::encode(const Array<char8_t>& text) const
+Array<u32> Tokenizer::encode(u32 size, const char8_t* text, bool bos, bool eos) const
 {
-    Array<uint32_t> tokens;
+    assert(0<size);
+    assert(nullptr != text);
+    Array<u32> tokens;
+    if(bos){
+        tokens.push_back(tokens_.getBOS());
+    }
+    if(u8'\0' != text[0]){
+        u32 token;
+        if(tokens_.encode(token, 1, u8" ")){
+            tokens.push_back(token);
+        }
+    }
+    u32 str_len = 0;
+    for(const char8_t* c=text; *c != u8'\0'; ++c){
+        if ((*c & 0xC0) != 0x80) {
+            str_len = 0;
+        }
+        buffer_[str_len++] = *c;
+        buffer_[str_len] = u8'\0';
+        if((*(c+1) & 0xC0) == 0x80 && str_len < 4) {
+            continue;
+        }
+        u32 token;
+        if(tokens_.encode(token, str_len, buffer_)){
+            tokens.push_back(token);
+        }else{
+            for(u32 i=0; i<str_len; ++i){
+                tokens.push_back(buffer_[i]) + 3UL;
+            }
+        }
+    }
     return tokens;
 }
 
-//--- Model
+//--- Sampler
 //-----------------------------------------------------------
-Model::Model()
+Sampler::Sampler()
+    : vocab_size_(0)
+    , temperature_(1.0f)
+    , topp_(0.9f)
 {
 }
 
-Model::~Model()
+Sampler::~Sampler()
 {
+}
+
+Sampler::Sampler(Sampler&& other)
+{
+}
+
+Sampler& Sampler::operator=(Sampler&& other)
+{
+}
+
+u32 Sampler::sample(f32* logits)
+{
+    assert(nullptr != logits);
+    if(temperature_<=std::numeric_limits<f32>::epsilon()){
+        return sample_argmax(vocab_size_, logits);
+    }
+    f32 inv_temperature = 1.0f/temperature_;
+    for(u32 i=0; i<vocab_size_; ++i){
+        logits[i] *= inv_temperature;
+    }
+    op::softmax(vocab_size_, logits);
+    f32 coin = random_.frand();
+    if(topp_<=0.0f || 1.0f<=topp_){
+        return sample_mult(vocab_size_, coin, logits);
+    }else{
+        return sample_topp(vocab_size_, topp_, coin, probindex_, logits);
+    }
+}
+
+u32 Sampler::sample_argmax(u32 size, const f32* probabilities)
+{
+    assert(0 < size);
+    u32 max_index = 0;
+    f32 max_p = probabilities[0];
+    for(u32 i = 1; i < size; ++i) {
+        if(max_p < probabilities[i]) {
+            max_index = i;
+            max_p = probabilities[i];
+        }
+    }
+    return max_index;
+}
+
+u32 Sampler::sample_mult(u32 size, f32 coin, const f32* probabilities)
+{
+    f32 cdf = 0.0f;
+    for(u32 i=0; i<size; ++i){
+        cdf += probabilities[i];
+        if(coin < cdf){
+            return i;
+        }
+    }
+    return size-1;
+}
+
+u32 Sampler::sample_topp(u32 size, f32 topp, f32 coin, ProbIndex* probindex, const f32* probabilities)
+{
+    u32 n0 = 0;
+    const f32 cutoff = (1.0f-topp)/(size-1);
+    for(u32 i=0; i<size; ++i){
+        if(cutoff<=probabilities[i]){
+            probindex[n0].index_ = i;
+            probindex[n0].prob_ = probabilities[i];
+            ++n0;
+        }
+    }
+    std::sort(probindex, probindex + n0, [](const ProbIndex& x0, const ProbIndex& x1) {
+        return x0.prob_ > x1.prob_;
+    });
+    f32 cumulative_prob = 0.0f;
+    u32 end = n0;
+    for(u32 i=0; i<n0; ++i){
+        cumulative_prob += probindex[i].prob_;
+        if(topp<cumulative_prob){
+            end = i+1;
+            break;
+        }
+    }
+    f32 r = coin * cumulative_prob;
+    f32 cdf = 0.0f;
+    for(u32 i=0; i<end; ++i){
+        cdf += probindex[i].prob_;
+        if(r<cdf){
+            return probindex[i].index_;
+        }
+    }
+    return probindex[end-1].index_;
 }
 
 //--- Llama2
@@ -2632,10 +2812,36 @@ Llama2::~Llama2()
 
 Llama2& Llama2::operator=(Llama2&& other)
 {
-    if(this == &other) {
-        return *this;
+    if(this != &other) {
+        config_ = other.config_;
     }
-    config_ = other.config_;
     return *this;
+}
+
+void Llama2::forward(u32 token, u32 position)
+{
+    for(u64 i = 0; i < config_.num_layers_; ++i) {
+        blocks_[i].forward(
+            config_,
+            i,
+            position,
+            context_.x_,
+            context_.x_,
+            context_.query_,
+            context_.key_cache_,
+            context_.value_cache_,
+            context_.attn_,
+            context_.xb_,
+            context_.xb2_,
+            context_.hb_,
+            context_.hb2_);
+    }
+    output_rmsnorm_.forward(context_.x_, context_.x_);
+    op::matmul(
+        context_.logits_.data<f32>(),
+        context_.x_.data<f32>(),
+        output_weight_.data<f32>(),
+        config_.dimension_,
+        config_.vocab_size_);
 }
 } // namespace cppgpt
