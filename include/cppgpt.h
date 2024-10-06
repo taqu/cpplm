@@ -7,7 +7,6 @@
 #include <initializer_list>
 #include <istream>
 #include <memory>
-#include <re2/re2.h>
 #include <type_traits>
 #include <utility>
 
@@ -103,10 +102,28 @@ class Random
 {
 public:
     Random();
+    explicit Random(uint64_t seed);
     ~Random();
-    u32 rand();
-    f32 frand();
+
+    void srand(uint64_t seed);
+
+    /**
+     * @brief Generate a 32bit unsigned value
+     * @return
+     */
+    uint32_t rand();
+
+    /**
+     * @brief Generate a 32bit real number
+     * @return [0 1)
+     */
+    float frand();
+
 private:
+    inline static constexpr uint64_t DEFAULT_SEED64 = 12345ULL;
+    inline static constexpr uint64_t Increment = 1442695040888963407ULL;
+    inline static constexpr uint64_t Multiplier = 6364136223846793005ULL;
+    uint64_t state_;
 };
 
 //--- Array
@@ -1090,17 +1107,19 @@ public:
     const gguf::GGUFArray& getTokenTypes() const;
     const gguf::GGUFArray& getMerges() const;
     const gguf::GGUFArray& getAddedTokens() const;
-    u32 getBOS() const;
-    u32 getEOS() const;
-    u32 getUnknown() const;
-    u32 getSeparator() const;
-    u32 getPadding() const;
-    u32 getMaxTokenLength() const;
+    s32 getBOS() const;
+    s32 getEOS() const;
+    s32 getUnknown() const;
+    s32 getSeparator() const;
+    s32 getPadding() const;
+    s32 getCls() const;
+    s32 getMask() const;
+    s32 getMaxTokenLength() const;
 
-    bool encode(u32& token, const char8_t* str) const;
-    bool encode(u32& token, u64 length, const char8_t* str) const;
-    bool decode(char8_t str[512], u32 token) const;
-    bool decode(u64 length, char8_t str[], u32 token) const;
+    bool encode(s32& token, const char8_t* str) const;
+    bool encode(s32& token, u64 length, const char8_t* str) const;
+    bool decode(char8_t str[512], s32 token) const;
+    bool decode(u64 length, char8_t str[], s32 token) const;
 private:
     Tokens(const Tokens&) = delete;
     Tokens& operator=(const Tokens&) = delete;
@@ -1110,14 +1129,38 @@ private:
     gguf::GGUFArray token_types_;
     gguf::GGUFArray merges_;
     gguf::GGUFArray added_tokens_;
-    u32 bos_token_id_;
-    u32 eos_token_id_;
-    u32 unknown_token_id_;
-    u32 separator_token_id_;
-    u32 padding_token_id_;
-    u32 max_token_length_;
-    HashMap<String, u32> tokenToId_;
-    HashMap<u32, String> idToToken_;
+
+    struct Token
+    {
+        String text_;
+        f32 score_;
+        s32 type_;
+    };
+
+    s32 bos_token_id_;
+    s32 eos_token_id_;
+    s32 unknown_token_id_;
+    s32 separator_token_id_;
+    s32 padding_token_id_;
+    s32 cls_token_id_;
+    s32 mask_token_id_;
+
+    s32 add_bos_;
+    s32 add_eos_;
+    
+    s32 linefeed_id_;
+    s32 prefix_id_;
+    s32 suffix_id_;
+    s32 middle_id_;
+    s32 eot_id_;
+
+    bool add_space_prefix_;
+
+    s32 max_token_length_;
+    HashMap<String, s32> tokenToId_;
+    Array<Token> idToToken_;
+    Array<s32> cache_special_tokens_;
+    Array<String> cache_token_to_piece_;
 };
 
 //--- Tokenizer
@@ -1222,7 +1265,6 @@ private:
     void forward(u32 token, u32 position);
 
     Config config_;
-    GPT2TokenizerRef tokenize_;
     Sampler sampler_;
     Context context_;
     TransformerBlock* blocks_;

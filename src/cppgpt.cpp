@@ -1,6 +1,8 @@
 #include "cppgpt.h"
 #include <cmath>
 #include <functional>
+#include <algorithm>
+#include <bit>
 #include <immintrin.h>
 #include <mimalloc-2.1/mimalloc.h>
 
@@ -333,6 +335,98 @@ void* allocate(size_t size, size_t align)
 void deallocate(void* ptr, size_t align)
 {
     mi_free_aligned(ptr, align);
+}
+
+namespace
+{
+    //--- SplitMix
+//--------------------------------------------
+uint64_t SplitMix_next(uint64_t& state)
+{
+    state += 0x9E3779B97f4A7C15ULL;
+    uint64_t t = state;
+    t = (t ^ (t >> 30)) * 0xBF58476D1CE4E5B9ULL;
+    t = (t ^ (t >> 27)) * 0x94D049BB133111EBULL;
+    return t ^ (t >> 31);
+}
+
+/**
+     * @brief 32 bit right rotation
+     * @param [in] x ... input
+     * @param [in] r ... count of rotation
+     * @return rotated
+     */
+    inline uint32_t rotr32(uint32_t x, uint32_t r)
+    {
+        return (x >> r) | (x << ((~r + 1) & 31U));
+    }
+}
+
+//--- Random
+//------------------------------------------------------------
+Random::Random()
+    : state_{DEFAULT_SEED64}
+{
+}
+
+Random::Random(uint64_t seed)
+{
+    srand(seed);
+}
+
+Random::~Random()
+{
+}
+
+void Random::srand(uint64_t seed)
+{
+    state_ = SplitMix_next(seed);
+    while(0 == state_) {
+        state_ = SplitMix_next(state_);
+    }
+}
+
+uint32_t Random::rand()
+{
+    uint64_t x = state_;
+    uint32_t c = static_cast<uint32_t>(x >> 59);
+    state_ = x * Multiplier + Increment;
+    x ^= x >> 18;
+    return rotr32(static_cast<uint32_t>(x >> 27), c);
+}
+
+float Random::frand()
+{
+    constexpr int32_t lowExp = 0;
+    constexpr int32_t highExp = 127;
+    const uint32_t u = rand();
+    const uint32_t b = u & 0xFFU;
+    int32_t exponent = highExp - 1;
+    if(0 == b) {
+        exponent -= 8;
+        while(true) {
+            const uint32_t bits = rand();
+            if(0 == bits) {
+                exponent -= 32;
+                if(exponent < lowExp) {
+                    exponent = lowExp;
+                    break;
+                }
+            } else {
+                int32_t c = std::countr_zero(bits);
+                exponent -= c;
+                break;
+            }
+        }
+    }else{
+        int32_t c = std::countr_zero(b);
+        exponent -= c;
+    }
+    const uint32_t mantissa = (u>>8)&0x7FFFFFUL;
+    if(0==mantissa && (u>>31)){
+        ++exponent;
+    }
+    return std::bit_cast<float,uint32_t>((exponent<<23)|mantissa);
 }
 
 //--- wyhash
@@ -2175,8 +2269,8 @@ void SelfAttention::forward(
             f32 fcr = ::cosf(value);
             f32 fci = ::sinf(value);
             u32 rotn = i < kv_dim ? 2 : 1;
-            for(u32 v = 0; v < rotn; ++v) {
-                f32* vec = (0 == v) ? q : k;
+            for(u32 j = 0; j < rotn; ++j) {
+                f32* vec = (0 == j) ? q : k;
                 f32 v0 = vec[i + 0];
                 f32 v1 = vec[i + 1];
                 vec[i + 0] = v0 * fcr - v1 * fci;
@@ -2187,7 +2281,7 @@ void SelfAttention::forward(
     // multihead attention. iterate over all heads
     {
         ::memset(input.data<f32>(), 0, n_heads*head_size*sizeof(f32));
-        f32 inv_head_size = 1.0f / ::sqrtf(head_size);
+        f32 inv_head_size = 1.0f / ::sqrtf(static_cast<float>(head_size));
         for(u64 h = 0; h < n_heads; ++h) {
             const f32* tq = q + h * head_size;                               // query vector for this head
             f32* attn = attention.data<f32>() + h * config.sequence_length_; // attention scores for this head
@@ -2209,11 +2303,11 @@ void SelfAttention::forward(
             // weighted sum of the values, store back to the current tensor
             f32* xb = input.data<f32>() + h * head_size;
             for(u64 t = 0; t <= position; ++t) {
-                f32* v = value_cache.data<f32>() + layer_offset + t * kv_dim + (h / kv_mul) * head_size;
+                f32* value = value_cache.data<f32>() + layer_offset + t * kv_dim + (h / kv_mul) * head_size;
                 f32 a = attn[t];
                 // accumulate the weighted value
                 for(u64 i = 0; i < head_size; ++i) {
-                    xb[i] += a * v[i];
+                    xb[i] += a * value[i];
                 }
             }
         } // for(u64 h
@@ -2278,7 +2372,7 @@ void FeedForwardSwiGLU::forward(
     Tensor& buffer1)
 {
     u64 dim = config.dimension_;
-    u32 hidden_dim = config.hidden_dim_;
+    u32 hidden_dim = static_cast<u32>(config.hidden_dim_);
     op::matmul(buffer0.data<f32>(), input.data<f32>(), ffn_gate_.data<f32>(), dim, hidden_dim);
     op::matmul(buffer1.data<f32>(), input.data<f32>(), ffn_up_.data<f32>(), dim, hidden_dim);
 
@@ -2310,6 +2404,7 @@ void FeedForwardSwiGLU::forward(
 
 TransformerBlock& TransformerBlock::operator=(TransformerBlock&& other)
 {
+    return *this;
 }
 
 void TransformerBlock::forward(
@@ -2360,11 +2455,21 @@ Tokens::Tokens()
     , token_types_{}
     , merges_{}
     , added_tokens_{}
-    , bos_token_id_(0)
-    , eos_token_id_(0)
+    , bos_token_id_(1)
+    , eos_token_id_(2)
     , unknown_token_id_(0)
-    , separator_token_id_(0)
-    , padding_token_id_(0)
+    , separator_token_id_(-1)
+    , padding_token_id_(-1)
+    , cls_token_id_(-1)
+    , mask_token_id_(-1)
+    , add_bos_(-1)
+    , add_eos_(-1)
+    , linefeed_id_(13)
+    , prefix_id_(-1)
+    , suffix_id_(-1)
+    , middle_id_(-1)
+    , eot_id_(-1)
+    , add_space_prefix_(true)
     , max_token_length_(0)
 {
 }
@@ -2376,11 +2481,21 @@ Tokens::Tokens(const gguf::GGUF& model_data)
     , token_types_{}
     , merges_{}
     , added_tokens_{}
-    , bos_token_id_(0)
-    , eos_token_id_(0)
+    , bos_token_id_(1)
+    , eos_token_id_(2)
     , unknown_token_id_(0)
-    , separator_token_id_(0)
-    , padding_token_id_(0)
+    , separator_token_id_(-1)
+    , padding_token_id_(-1)
+    , cls_token_id_(-1)
+    , mask_token_id_(-1)
+    , add_bos_(-1)
+    , add_eos_(-1)
+    , linefeed_id_(13)
+    , prefix_id_(-1)
+    , suffix_id_(-1)
+    , middle_id_(-1)
+    , eot_id_(-1)
+    , add_space_prefix_(true)
     , max_token_length_(0)
 {
     using namespace gguf;
@@ -2423,14 +2538,26 @@ Tokens::Tokens(const gguf::GGUF& model_data)
 
     // Add tokens to maps
     tokenToId_.reserve(static_cast<u32>(tokens_.size_));
-    idToToken_.reserve(static_cast<u32>(tokens_.size_));
-    u32 id = 0;
+    idToToken_.resize(tokens_.size_);
+    ::memset(&idToToken_[0], 0, sizeof(Token)*tokens_.size_);
+    s32 id = 0;
+
     for(GGUFArray::Iterator<GGUFString> itr = tokens_.begin<GGUFString>(); itr; ++itr, ++id) {
         GGUFString ggufStr = *itr;
         String str = {ggufStr.length_, ggufStr.str_};
-        max_token_length_ = (std::max)(max_token_length_, static_cast<u32>(ggufStr.length_));
+        max_token_length_ = (std::max)(max_token_length_, static_cast<s32>(ggufStr.length_));
         tokenToId_.add(str, id);
-        idToToken_.add(id, str);
+        if(id<idToToken_.size()){
+            Token token = {};
+            token.text_ = str;
+            if(id<scores_.size_){
+                token.score_ = scores_.get<f32>(id);
+            }
+            if(id<token_types_.size_){
+                token.type_ = token_types_.get<s32>(id);
+            }
+            idToToken_[id] = token;
+        }
     }
 }
 
@@ -2450,6 +2577,16 @@ Tokens::Tokens(Tokens&& other)
     , unknown_token_id_(other.unknown_token_id_)
     , separator_token_id_(other.separator_token_id_)
     , padding_token_id_(other.padding_token_id_)
+    , cls_token_id_(other.cls_token_id_)
+    , mask_token_id_(other.mask_token_id_)
+    , add_bos_(other.add_bos_)
+    , add_eos_(other.add_eos_)
+    , linefeed_id_(other.linefeed_id_)
+    , prefix_id_(other.prefix_id_)
+    , suffix_id_(other.suffix_id_)
+    , middle_id_(other.middle_id_)
+    , eot_id_(other.eot_id_)
+    , add_space_prefix_(other.add_space_prefix_)
     , max_token_length_(other.max_token_length_)
     , tokenToId_(std::move(other.tokenToId_))
     , idToToken_(std::move(other.idToToken_))
@@ -2460,11 +2597,20 @@ Tokens::Tokens(Tokens&& other)
     other.token_types_ = {};
     other.merges_ = {};
     other.added_tokens_ = {};
-    other.bos_token_id_ = 0;
-    other.eos_token_id_ = 0;
+    other.bos_token_id_ = 1;
+    other.eos_token_id_ = 2;
     other.unknown_token_id_ = 0;
-    other.separator_token_id_ = 0;
-    other.padding_token_id_ = 0;
+    other.separator_token_id_ = -1;
+    other.cls_token_id_ = -1;
+    other.mask_token_id_ = -1;
+    other.add_bos_ = -1;
+    other.add_eos_ = -1;
+    other.linefeed_id_ = 13;
+    other.prefix_id_ = -1;
+    other.suffix_id_ = -1;
+    other.middle_id_ = -1;
+    other.eot_id_ = -1;
+    other.add_space_prefix_ = true;
     other.max_token_length_ = 0;
 }
 
@@ -2481,7 +2627,16 @@ Tokens& Tokens::operator=(Tokens&& other)
         eos_token_id_ = other.eos_token_id_;
         unknown_token_id_ = other.unknown_token_id_;
         separator_token_id_ = other.separator_token_id_;
-        padding_token_id_ = other.padding_token_id_;
+        cls_token_id_ = other.cls_token_id_;
+        mask_token_id_ = other.mask_token_id_;
+        add_bos_ = other.add_bos_;
+        add_eos_ = other.add_eos_;
+        linefeed_id_ = other.linefeed_id_;
+        prefix_id_ = other.prefix_id_;
+        suffix_id_ = other.suffix_id_;
+        middle_id_ = other.middle_id_;
+        eot_id_ = other.eot_id_;
+        add_space_prefix_ = other.add_space_prefix_;
         max_token_length_ = other.max_token_length_;
         tokenToId_ = std::move(other.tokenToId_);
         idToToken_ = std::move(other.idToToken_);
@@ -2492,11 +2647,19 @@ Tokens& Tokens::operator=(Tokens&& other)
         other.token_types_ = {};
         other.merges_ = {};
         other.added_tokens_ = {};
-        other.bos_token_id_ = 0;
-        other.eos_token_id_ = 0;
+        other.bos_token_id_ = 1;
+        other.eos_token_id_ = 2;
         other.unknown_token_id_ = 0;
-        other.separator_token_id_ = 0;
-        other.padding_token_id_ = 0;
+        other.separator_token_id_ = -1;
+        other.cls_token_id_ = -1;
+        other.mask_token_id_ = -1;
+        other.add_bos_ = -1;
+        other.add_eos_ = -1;
+        other.linefeed_id_ = 13;
+        other.prefix_id_ = -1;
+        other.suffix_id_ = -1;
+        other.middle_id_ = -1;
+        other.eot_id_ = -1;
         other.max_token_length_ = 0;
     }
     return *this;
@@ -2532,38 +2695,43 @@ const gguf::GGUFArray& Tokens::getAddedTokens() const
     return added_tokens_;
 }
 
-u32 Tokens::getBOS() const
+s32 Tokens::getBOS() const
 {
     return bos_token_id_;
 }
 
-u32 Tokens::getEOS() const
+s32 Tokens::getEOS() const
 {
     return eos_token_id_;
 }
 
-u32 Tokens::getUnknown() const
+s32 Tokens::getUnknown() const
 {
     return unknown_token_id_;
 }
 
-u32 Tokens::getSeparator() const
+s32 Tokens::getSeparator() const
 {
     return separator_token_id_;
 }
 
-u32 Tokens::getPadding() const
+s32 Tokens::getPadding() const
 {
     return padding_token_id_;
 }
 
-bool Tokens::encode(u32& token, const char8_t* str) const
+s32 Tokens::getMaxTokenLength() const
+{
+    return max_token_length_;
+}
+
+bool Tokens::encode(s32& token, const char8_t* str) const
 {
     assert(nullptr != str);
     String key;
     key.len_ = ::strnlen(reinterpret_cast<const char*>(str), 128);
     key.str_ = str;
-    const u32* id = nullptr;
+    const s32* id = nullptr;
     if(tokenToId_.tryGet(key, id)) {
         token = *id;
         return true;
@@ -2571,13 +2739,13 @@ bool Tokens::encode(u32& token, const char8_t* str) const
     return false;
 }
 
-bool Tokens::encode(u32& token, u64 length, const char8_t* str) const
+bool Tokens::encode(s32& token, u64 length, const char8_t* str) const
 {
     assert(nullptr != str);
     String key;
     key.len_ = length;
     key.str_ = str;
-    const u32* id = nullptr;
+    const s32* id = nullptr;
     if(tokenToId_.tryGet(key, id)) {
         token = *id;
         return true;
@@ -2585,28 +2753,28 @@ bool Tokens::encode(u32& token, u64 length, const char8_t* str) const
     return false;
 }
 
-bool Tokens::decode(char8_t str[512], u32 token) const
+bool Tokens::decode(char8_t str[512], s32 token) const
 {
-    const String* value = nullptr;
-    if(idToToken_.tryGet(token, value)) {
-        u64 len = (std::min)(511ULL, value->len_);
-        ::memcpy(str, value->str_, len);
-        str[len] = u8'\0';
-        return true;
-    }
+    //if(static_cast<u64>(token)<idToToken_.size()){
+    //    const String& value = idToToken_[static_cast<u32>(token)];
+    //    u64 len = (std::min)(511ULL, value.len_);
+    //    ::memcpy(str, value.str_, len);
+    //    str[len] = u8'\0';
+    //    return true;
+    //}
     return false;
 }
 
-bool Tokens::decode(u64 length, char8_t str[], u32 token) const
+bool Tokens::decode(u64 length, char8_t str[], s32 token) const
 {
     assert(0 < length);
-    const String* value = nullptr;
-    if(idToToken_.tryGet(token, value)) {
-        u64 len = (std::min)(length - 1, value->len_);
-        ::memcpy(str, value->str_, len);
-        str[len] = u8'\0';
-        return true;
-    }
+    //if(static_cast<u64>(token)<idToToken_.size()){
+    //    const String& value = idToToken_[static_cast<u32>(token)];
+    //    u64 len = (std::min)(length - 1, value.len_);
+    //    ::memcpy(str, value.str_, len);
+    //    str[len] = u8'\0';
+    //    return true;
+    //}
     return false;
 }
 
@@ -2660,6 +2828,7 @@ Array<u32> Tokenizer::encode(u32 size, const char8_t* text, bool bos, bool eos) 
     assert(0<size);
     assert(nullptr != text);
     Array<u32> tokens;
+    #if 0
     if(bos){
         tokens.push_back(tokens_.getBOS());
     }
@@ -2688,6 +2857,7 @@ Array<u32> Tokenizer::encode(u32 size, const char8_t* text, bool bos, bool eos) 
             }
         }
     }
+    #endif
     return tokens;
 }
 
@@ -2710,6 +2880,7 @@ Sampler::Sampler(Sampler&& other)
 
 Sampler& Sampler::operator=(Sampler&& other)
 {
+    return *this;
 }
 
 u32 Sampler::sample(f32* logits)

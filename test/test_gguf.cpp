@@ -8,7 +8,7 @@ TEST_CASE("Load GGUF" "[GGUF]")
 {
 	using namespace gguf;
 	GGUF gguf;
-	gguf::Error result = gguf.load(u8"./data/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf");
+	gguf::Error result = gguf.load(u8"./data/tinyllama-1.1b-chat-v1.0.Q2_K.gguf");
 	CHECK(gguf::Error::Success == result);
 }
 
@@ -17,14 +17,14 @@ TEST_CASE("Load Vocab" "[GGUF]")
 	using namespace gguf;
 	using namespace cppgpt;
 	GGUF gguf;
-	gguf::Error result = gguf.load(u8"./data/gpt2.Q8_0.gguf");
+	gguf::Error result = gguf.load(u8"./data/tinyllama-1.1b-chat-v1.0.Q2_K.gguf");
 	CHECK(gguf::Error::Success == result);
 	Tokens tokens(gguf);
 	for(auto&& itr=tokens.getTokens().begin<GGUFString>(); itr; ++itr){
 		GGUFString ggufStr = *itr;
 		CHECK(ggufStr.length_<512);
 		bool result;
-		u32 token;
+		s32 token;
 		result = tokens.encode(token, ggufStr.length_, ggufStr.str_);
 		CHECK(result);
 		char8_t decoded[512];

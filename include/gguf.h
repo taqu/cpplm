@@ -449,6 +449,15 @@ struct GGUFArray
         return Iterator<T>(size_, items_);
     }
 
+    template<class T>
+    T get(uint64_t x) const
+    {
+        assert(x<size_);
+        T r;
+        ::memcpy(&r, &items_[x*sizeof(T)], sizeof(T));
+        return r;
+    }
+
     gguf_metadata_value_type type_;
     uint64_t size_;
     const uint8_t* items_;
