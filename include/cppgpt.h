@@ -9,6 +9,8 @@
 #include <memory>
 #include <type_traits>
 #include <utility>
+#include <string>
+#include <functional>
 
 // new/delete
 void* operator new(std::size_t size);
@@ -134,7 +136,7 @@ class Array
     static_assert(std::is_trivially_copyable<T>::value == true, "T should be trivially copyable.");
 
 public:
-    inline static constexpr uint64_t Expand = 16;
+    inline static constexpr uint64_t Expand = 64;
     Array();
     ~Array();
     Array(Array&& other);
@@ -250,7 +252,7 @@ bool Array<T>::resize(uint64_t size)
         new_capacity += Expand;
     }
     if(expand(new_capacity)) {
-        assert(size < new_capacity);
+        assert(size <= new_capacity);
         size_ = size;
         return true;
     } else {
@@ -284,6 +286,363 @@ bool Array<T>::expand(uint64_t capacity)
         ::memcpy(items, items_, sizeof(T) * capacity);
         delete[] items_;
     }
+    items_ = items;
+    capacity_ = capacity;
+    return true;
+}
+
+//--- PriorityQueue
+//-----------------------------------------------------------
+template<class T, class U=std::less<T>>
+class PriorityQueue
+{
+    static_assert(std::is_trivially_copyable<T>::value == true, "T should be trivially copyable.");
+
+public:
+    inline static constexpr uint32_t Invalid = 0xFFFF'FFFFUL;
+    inline static constexpr uint32_t Expand = 64;
+
+    struct Iterator
+    {
+    public:
+        Iterator(uint32_t capacity, uint32_t size, uint32_t pos, T* items);
+        operator bool() const;
+        void operator++();
+        T& operator*();
+        uint32_t position() const;
+    private:
+        uint32_t capacity_;
+        uint32_t size_;
+        uint32_t pos_;
+        T* items_;
+    };
+
+    struct ReverseIterator
+    {
+    public:
+        ReverseIterator(uint32_t capacity, uint32_t size, uint32_t pos, T* items);
+        operator bool() const;
+        void operator++();
+        T& operator*();
+        uint32_t position() const;
+    private:
+        uint32_t capacity_;
+        uint32_t size_;
+        uint32_t pos_;
+        T* items_;
+    };
+
+    PriorityQueue();
+    ~PriorityQueue();
+    PriorityQueue(PriorityQueue&& other);
+    PriorityQueue& operator=(PriorityQueue&& other);
+    uint32_t capacity() const;
+    uint32_t size() const;
+    const T& operator[](uint32_t index) const;
+    T& operator[](uint32_t index);
+    void clear();
+    bool reserve(uint32_t capacity);
+    bool resize(uint32_t capacity);
+    void push_back(const T& x);
+    const T& front() const;
+    T& front();
+    void pop_front();
+    Iterator begin();
+    ReverseIterator rbegin();
+
+private:
+    PriorityQueue(const PriorityQueue&) = delete;
+    PriorityQueue& operator=(const PriorityQueue&) = delete;
+
+    bool expand(uint32_t capacity);
+    uint32_t capacity_;
+    uint32_t size_;
+    uint32_t top_;
+    uint32_t end_;
+    U compare_;
+    T* items_;
+};
+
+template<class T, class U>
+PriorityQueue<T, U>::Iterator::Iterator(uint32_t capacity, uint32_t size, uint32_t pos, T* items)
+    : capacity_(capacity)
+    , size_(size)
+    , pos_(pos)
+    , items_(items)
+{
+}
+
+template<class T, class U>
+PriorityQueue<T, U>::Iterator::operator bool() const
+{
+    return 0<size_;
+}
+
+template<class T, class U>
+void PriorityQueue<T, U>::Iterator::operator++()
+{
+    assert(0<size_);
+    --size_;
+    ++pos_;
+    if(capacity_<=pos_){
+        pos_ = 0;
+    }
+}
+
+template<class T, class U>
+T& PriorityQueue<T, U>::Iterator::operator*()
+{
+    assert(pos_<capacity_);
+    return items_[pos_];
+}
+
+template<class T, class U>
+uint32_t PriorityQueue<T, U>::Iterator::position() const
+{
+    return pos_;
+}
+
+template<class T, class U>
+PriorityQueue<T, U>::ReverseIterator::ReverseIterator(uint32_t capacity, uint32_t size, uint32_t pos, T* items)
+    : capacity_(capacity)
+    , size_(size)
+    , pos_(pos)
+    , items_(items)
+{
+}
+
+template<class T, class U>
+PriorityQueue<T, U>::ReverseIterator::operator bool() const
+{
+    return 0<size_;
+}
+
+template<class T, class U>
+void PriorityQueue<T, U>::ReverseIterator::operator++()
+{
+    assert(0<size_);
+    --size_;
+    if(pos_<=0){
+        pos_ = capacity_-1;
+    }else{
+        --pos_;
+    }
+}
+
+template<class T, class U>
+T& PriorityQueue<T, U>::ReverseIterator::operator*()
+{
+    assert(pos_<capacity_);
+    return items_[pos_];
+}
+
+template<class T, class U>
+uint32_t PriorityQueue<T, U>::ReverseIterator::position() const
+{
+    return pos_;
+}
+
+template<class T, class U>
+PriorityQueue<T,U>::PriorityQueue()
+    : capacity_(0)
+    , size_(0)
+    , top_(0)
+    , end_(0)
+    , items_(nullptr)
+{
+}
+
+template<class T, class U>
+PriorityQueue<T,U>::~PriorityQueue()
+{
+    capacity_ = 0;
+    size_ = 0;
+    top_ = 0;
+    end_ = 0;
+    delete[] items_;
+    items_ = nullptr;
+}
+
+template<class T, class U>
+PriorityQueue<T,U>::PriorityQueue(PriorityQueue&& other)
+    : capacity_(other.capacity_)
+    , size_(other.size_)
+    , top_(other.top_)
+    , end_(other.end_)
+    , items_(other.items_)
+{
+    other.capacity_ = 0;
+    other.size_ = 0;
+    other.top_ = 0;
+    other.end_ = 0;
+    other.items_ = nullptr;
+}
+
+template<class T, class U>
+PriorityQueue<T,U>& PriorityQueue<T,U>::operator=(PriorityQueue&& other)
+{
+    if(this != &other) {
+        delete[] items_;
+        capacity_ = other.capacity_;
+        size_ = other.size_;
+        top_ = other.top_;
+        end_ = other.end_;
+        items_ = other.items_;
+        other.capacity_ = 0;
+        other.size_ = 0;
+        other.top_ = 0;
+        other.end_ = 0;
+        other.items_ = nullptr;
+    }
+    return *this;
+}
+
+template<class T, class U>
+uint32_t PriorityQueue<T,U>::capacity() const
+{
+    return capacity_;
+}
+
+template<class T, class U>
+uint32_t PriorityQueue<T,U>::size() const
+{
+    return size_;
+}
+
+template<class T, class U>const T& PriorityQueue<T,U>::operator[](uint32_t index) const
+{
+    assert(index < size_);
+    return items_[index];
+}
+
+template<class T, class U>
+T& PriorityQueue<T,U>::operator[](uint32_t index)
+{
+    assert(index < size_);
+    return items_[index];
+}
+
+template<class T, class U>
+void PriorityQueue<T,U>::clear()
+{
+    size_ = 0;
+}
+
+template<class T, class U>
+bool PriorityQueue<T,U>::reserve(uint32_t capacity)
+{
+    capacity = (std::max)(size_, capacity);
+    uint64_t new_capacity = Expand;
+    while(new_capacity < capacity) {
+        new_capacity += Expand;
+    }
+    return expand(new_capacity);
+}
+
+template<class T, class U>
+bool PriorityQueue<T,U>::resize(uint32_t size)
+{
+    size = (std::max)(capacity_, size);
+    uint64_t new_capacity = Expand;
+    while(new_capacity < size) {
+        new_capacity += Expand;
+    }
+    if(expand(new_capacity)) {
+        assert(size <= new_capacity);
+        size_ = size;
+        return true;
+    } else {
+        return false;
+    }
+}
+
+template<class T, class U>
+void PriorityQueue<T,U>::push_back(const T& x)
+{
+    if(capacity_ <= size_) {
+        if(!expand(capacity_ + Expand)) {
+            return;
+        }
+        assert(size_ < capacity_);
+    }
+    assert(end_<capacity_);
+    items_[end_] = x;
+    end_ = capacity_<=(end_+1)? 0 : (end_+1);
+    ++size_;
+    for(ReverseIterator itr = rbegin(); itr;){
+        uint32_t p0 = itr.position();
+        ++itr;
+        if(!itr){
+            break;
+        }
+        uint32_t p1 = itr.position();
+        if(compare_(items_[p0], items_[p1])){
+            break;
+        }
+        (std::swap)(items_[p0], items_[p1]);
+    }
+}
+
+template<class T, class U>
+const T& PriorityQueue<T, U>::front() const
+{
+    assert(0<size_);
+    return items_[top_];
+}
+
+template<class T, class U>
+T& PriorityQueue<T, U>::front()
+{
+    assert(0<size_);
+    return items_[top_];
+}
+
+template<class T, class U>
+void PriorityQueue<T, U>::pop_front()
+{
+    assert(0<size_);
+    top_ = capacity_<=(top_+1)? 0 : (top_+1);
+    --size_;
+}
+
+template<class T, class U>
+PriorityQueue<T, U>::Iterator PriorityQueue<T, U>::begin()
+{
+    uint32_t pos = (0<end_)? end_-1 : capacity_-1;
+    return Iterator(capacity_, size_, pos, items_);
+}
+
+template<class T, class U>
+PriorityQueue<T, U>::ReverseIterator PriorityQueue<T, U>::rbegin()
+{
+    uint32_t pos = (0<end_)? end_-1 : capacity_-1;
+    return ReverseIterator(capacity_, size_, pos, items_);
+}
+
+template<class T, class U>
+bool PriorityQueue<T,U>::expand(uint32_t capacity)
+{
+    if(capacity <= capacity_) {
+        return true;
+    }
+    T* items = new T[capacity];
+
+    if(0 < size_) {
+        if(end_<=top_) {
+            assert(top_ == end_);
+            assert(size_ == capacity_);
+            assert(top_<capacity_);
+            ::memcpy(items, items_+top_, (capacity_-top_)*sizeof(T));
+            if(0 < end_) {
+                ::memcpy(items + top_, items_, end_*sizeof(T));
+            }
+        } else {
+            ::memcpy(items, items_ + top_, size_*sizeof(T));
+        }
+        top_ = 0;
+        end_ = size_;
+    }
+    delete[] items_;
     items_ = items;
     capacity_ = capacity;
     return true;
@@ -1088,18 +1447,18 @@ struct Hasher<u32>
     }
 };
 
-//--- Tokens
+//--- Vocabulary
 //-----------------------------------------------------------
-class Tokens
+class Vocabulary
 {
 public:
     inline static constexpr u32 Invalid = 0xFFFF'FFFFUL;
 
-    Tokens();
-    Tokens(const gguf::GGUF& model_data);
-    ~Tokens();
-    Tokens(Tokens&& other);
-    Tokens& operator=(Tokens&& other);
+    Vocabulary();
+    Vocabulary(const gguf::GGUF& model_data);
+    ~Vocabulary();
+    Vocabulary(Vocabulary&& other);
+    Vocabulary& operator=(Vocabulary&& other);
 
     const gguf::GGUFString& getModel() const;
     const gguf::GGUFArray& getTokens() const;
@@ -1121,8 +1480,8 @@ public:
     bool decode(char8_t str[512], s32 token) const;
     bool decode(u64 length, char8_t str[], s32 token) const;
 private:
-    Tokens(const Tokens&) = delete;
-    Tokens& operator=(const Tokens&) = delete;
+    Vocabulary(const Vocabulary&) = delete;
+    Vocabulary& operator=(const Vocabulary&) = delete;
     gguf::GGUFString model_;
     gguf::GGUFArray tokens_;
     gguf::GGUFArray scores_;
@@ -1171,18 +1530,48 @@ public:
     Tokenizer();
     Tokenizer(const gguf::GGUF& model_data);
     ~Tokenizer();
-    Tokenizer(Tokenizer&& other);
+    Tokenizer(Tokenizer&& other) noexcept;
     Tokenizer& operator=(Tokenizer&& other);
-    String decode(u32 token) const;
-    Array<u32> encode(u32 size, const char8_t* text, bool bos, bool eos) const;
+    Array<s32> tokenize(const std::string& text);
 
 private:
     Tokenizer(const Tokenizer&) = delete;
     Tokenizer& operator=(const Tokenizer&) = delete;
 
+    struct Symbol
+    {
+        using index = s32;
+        index prev_;
+        index next_;
+        u64 len_;
+        const char8_t* text_;
+    };
+
+    struct Bigram
+    {
+        struct Comparator
+        {
+            bool operator()(Bigram& x0, Bigram& x1) const
+            {
+                return (x0.score_ < x1.score_)
+                    || (x0.score_ == x1.score_ && x0.left_ > x1.left_);
+            }
+        };
+        Symbol::index left_;
+        Symbol::index right_;
+        float score_;
+        u64 size_;
+    };
+    static u64 length(char c);
+    void try_add_bigram(Symbol::index left, Symbol::index right);
+
     static const char8_t* Pattern;
     char8_t* buffer_;
-    Tokens tokens_;
+    Vocabulary tokens_;
+    Array<Symbol> symbols_;
+    PriorityQueue<Bigram> work_queue_;
+
+    //std::map<std::string, std::pair<int, int>> rev_merge;
 };
 
 //--- Sampler

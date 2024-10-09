@@ -2446,9 +2446,9 @@ void TransformerBlock::forward(
     ff_residual_.forward(output, input, buffer0);
 }
 
-//--- Tokens
+//--- Vocabulary
 //-----------------------------------------------------------
-Tokens::Tokens()
+Vocabulary::Vocabulary()
     : model_{}
     , tokens_{}
     , scores_{}
@@ -2474,7 +2474,7 @@ Tokens::Tokens()
 {
 }
 
-Tokens::Tokens(const gguf::GGUF& model_data)
+Vocabulary::Vocabulary(const gguf::GGUF& model_data)
     : model_{}
     , tokens_{}
     , scores_{}
@@ -2561,11 +2561,11 @@ Tokens::Tokens(const gguf::GGUF& model_data)
     }
 }
 
-Tokens::~Tokens()
+Vocabulary::~Vocabulary()
 {
 }
 
-Tokens::Tokens(Tokens&& other)
+Vocabulary::Vocabulary(Vocabulary&& other)
     : model_(other.model_)
     , tokens_(other.tokens_)
     , scores_(other.scores_)
@@ -2614,7 +2614,7 @@ Tokens::Tokens(Tokens&& other)
     other.max_token_length_ = 0;
 }
 
-Tokens& Tokens::operator=(Tokens&& other)
+Vocabulary& Vocabulary::operator=(Vocabulary&& other)
 {
     if(this != &other) {
         model_ = other.model_;
@@ -2665,67 +2665,77 @@ Tokens& Tokens::operator=(Tokens&& other)
     return *this;
 }
 
-const gguf::GGUFString& Tokens::getModel() const
+const gguf::GGUFString& Vocabulary::getModel() const
 {
     return model_;
 }
 
-const gguf::GGUFArray& Tokens::getTokens() const
+const gguf::GGUFArray& Vocabulary::getTokens() const
 {
     return tokens_;
 }
 
-const gguf::GGUFArray& Tokens::getScores() const
+const gguf::GGUFArray& Vocabulary::getScores() const
 {
     return scores_;
 }
 
-const gguf::GGUFArray& Tokens::getTokenTypes() const
+const gguf::GGUFArray& Vocabulary::getTokenTypes() const
 {
     return token_types_;
 }
 
-const gguf::GGUFArray& Tokens::getMerges() const
+const gguf::GGUFArray& Vocabulary::getMerges() const
 {
     return merges_;
 }
 
-const gguf::GGUFArray& Tokens::getAddedTokens() const
+const gguf::GGUFArray& Vocabulary::getAddedTokens() const
 {
     return added_tokens_;
 }
 
-s32 Tokens::getBOS() const
+s32 Vocabulary::getBOS() const
 {
     return bos_token_id_;
 }
 
-s32 Tokens::getEOS() const
+s32 Vocabulary::getEOS() const
 {
     return eos_token_id_;
 }
 
-s32 Tokens::getUnknown() const
+s32 Vocabulary::getUnknown() const
 {
     return unknown_token_id_;
 }
 
-s32 Tokens::getSeparator() const
+s32 Vocabulary::getSeparator() const
 {
     return separator_token_id_;
 }
 
-s32 Tokens::getPadding() const
+s32 Vocabulary::getPadding() const
 {
     return padding_token_id_;
 }
 
-s32 Tokens::getMaxTokenLength() const
+s32 Vocabulary::getCls() const
+{
+    return cls_token_id_;
+}
+
+s32 Vocabulary:: getMask() const
+{
+    return mask_token_id_;
+}
+
+s32 Vocabulary::getMaxTokenLength() const
 {
     return max_token_length_;
 }
 
-bool Tokens::encode(s32& token, const char8_t* str) const
+bool Vocabulary::encode(s32& token, const char8_t* str) const
 {
     assert(nullptr != str);
     String key;
@@ -2739,7 +2749,7 @@ bool Tokens::encode(s32& token, const char8_t* str) const
     return false;
 }
 
-bool Tokens::encode(s32& token, u64 length, const char8_t* str) const
+bool Vocabulary::encode(s32& token, u64 length, const char8_t* str) const
 {
     assert(nullptr != str);
     String key;
@@ -2753,7 +2763,7 @@ bool Tokens::encode(s32& token, u64 length, const char8_t* str) const
     return false;
 }
 
-bool Tokens::decode(char8_t str[512], s32 token) const
+bool Vocabulary::decode(char8_t str[512], s32 token) const
 {
     //if(static_cast<u64>(token)<idToToken_.size()){
     //    const String& value = idToToken_[static_cast<u32>(token)];
@@ -2765,7 +2775,7 @@ bool Tokens::decode(char8_t str[512], s32 token) const
     return false;
 }
 
-bool Tokens::decode(u64 length, char8_t str[], s32 token) const
+bool Vocabulary::decode(u64 length, char8_t str[], s32 token) const
 {
     assert(0 < length);
     //if(static_cast<u64>(token)<idToToken_.size()){
@@ -2799,7 +2809,7 @@ Tokenizer::~Tokenizer()
     buffer_ = nullptr;
 }
 
-Tokenizer::Tokenizer(Tokenizer&& other)
+Tokenizer::Tokenizer(Tokenizer&& other) noexcept
     :tokens_(std::move(other.tokens_))
     ,buffer_(other.buffer_)
 {
@@ -2818,47 +2828,103 @@ Tokenizer& Tokenizer::operator=(Tokenizer&& other)
     return *this;
 }
 
-String Tokenizer::decode(u32 token) const
+Array<s32> Tokenizer::tokenize(const std::string& text)
 {
-    return String{};
+    Array<s32> result;
+    symbols_.clear();
+    symbols_.reserve(text.size());
+    // split string into utf8 chars
+        s32 index = 0;
+        u64 offset = 0;
+        while(offset < text.size()){
+            Symbol symbol;
+            size_t len = length(text[offset]);
+            symbol.text_ = reinterpret_cast<const char8_t*>(text.c_str()) + offset;
+            symbol.len_ = (std::min)(static_cast<u64>(len), text.size() - offset);
+            offset += symbol.len_;
+            symbol.prev_ = index - 1;
+            symbol.next_ = offset == text.size() ? -1 : index + 1;
+            ++index;
+            symbols_.push_back(symbol);
+        }
+
+        // seed the work queue with all possible 2-character tokens.
+        for (u64 i = 1; i < symbols_.size(); ++i) {
+            try_add_bigram(i - 1, i);
+        }
+
+        // keep substituting the highest frequency pairs for as long as we can.
+        while (0<work_queue_.size()) {
+            Bigram bigram = work_queue_.front();
+            work_queue_.pop_front();
+
+            Symbol& left_sym = symbols_[bigram.left_];
+            Symbol& right_sym = symbols_[bigram.right_];
+
+            // if one of the symbols already got merged, skip it.
+            if (left_sym.len_ == 0
+                || right_sym.len_ == 0
+                || (left_sym.len_ + right_sym.len_) != bigram.size_) {
+                continue;
+            }
+
+            // merge the right sym into the left one
+            left_sym.len_ += right_sym.len_;
+            right_sym.len_ = 0;
+
+            // remove the right sym from the chain
+            left_sym.next_ = right_sym.next_;
+            if (0<=right_sym.next_) {
+                symbols_[right_sym.next_].prev_ = bigram.left_;
+            }
+
+            // find more substitutions
+            try_add_bigram(left_sym.prev_, bigram.left_);
+            try_add_bigram(bigram.left_, left_sym.next_);
+        }
+
+        for (s32 i = 0; i != -1; i = symbols_[i].next_) {
+            Symbol& symbol = symbols_[i];
+            resegment(symbol, output);
+        }
+        return result;
 }
 
-Array<u32> Tokenizer::encode(u32 size, const char8_t* text, bool bos, bool eos) const
+u64 Tokenizer::length(char c)
 {
-    assert(0<size);
-    assert(nullptr != text);
-    Array<u32> tokens;
-    #if 0
-    if(bos){
-        tokens.push_back(tokens_.getBOS());
-    }
-    if(u8'\0' != text[0]){
-        u32 token;
-        if(tokens_.encode(token, 1, u8" ")){
-            tokens.push_back(token);
+    static const u64 lookup[] = {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 2, 3, 4};
+    return lookup[static_cast<uint8_t>(c) >> 4];
+}
+
+void Tokenizer::try_add_bigram(Symbol::index left, Symbol::index right)
+{
+    if (left == -1 || right == -1) {
+            return;
         }
-    }
-    u32 str_len = 0;
-    for(const char8_t* c=text; *c != u8'\0'; ++c){
-        if ((*c & 0xC0) != 0x80) {
-            str_len = 0;
+
+        const std::string text = std::string(reinterpret_cast<const char*>(symbols_[left].text_), symbols_[left].len_ + symbols_[right].len_);
+        auto token = vocab.token_to_id.find(text);
+
+        if (token == vocab.token_to_id.end()) {
+            return;
         }
-        buffer_[str_len++] = *c;
-        buffer_[str_len] = u8'\0';
-        if((*(c+1) & 0xC0) == 0x80 && str_len < 4) {
-            continue;
+
+        if (static_cast<size_t>((*token).second) >= vocab.id_to_token.size()) {
+            return;
         }
-        u32 token;
-        if(tokens_.encode(token, str_len, buffer_)){
-            tokens.push_back(token);
-        }else{
-            for(u32 i=0; i<str_len; ++i){
-                tokens.push_back(buffer_[i]) + 3UL;
-            }
-        }
-    }
-    #endif
-    return tokens;
+
+        const auto & tok_data = vocab.id_to_token[(*token).second];
+
+        Bigram bigram;
+        bigram.left  = left;
+        bigram.right = right;
+        bigram.score = tok_data.score;
+        bigram.size  = text.size();
+
+        work_queue.push(bigram);
+
+        // Do we need to support is_unused?
+        rev_merge[text] = std::make_pair(left, right);
 }
 
 //--- Sampler

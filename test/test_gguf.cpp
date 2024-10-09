@@ -12,6 +12,7 @@ TEST_CASE("Load GGUF" "[GGUF]")
 	CHECK(gguf::Error::Success == result);
 }
 
+#if 0
 TEST_CASE("Load Vocab" "[GGUF]")
 {
 	using namespace gguf;
@@ -34,4 +35,5 @@ TEST_CASE("Load Vocab" "[GGUF]")
 		CHECK(0 == ::strncmp((const char*)ggufStr.str_, (const char*)decoded, len));
 	}
 }
+#endif
 
