@@ -1452,6 +1452,13 @@ struct Hasher<u32>
 class Vocabulary
 {
 public:
+    struct Token
+    {
+        String text_;
+        f32 score_;
+        s32 type_;
+    };
+
     inline static constexpr u32 Invalid = 0xFFFF'FFFFUL;
 
     Vocabulary();
@@ -1474,6 +1481,9 @@ public:
     s32 getCls() const;
     s32 getMask() const;
     s32 getMaxTokenLength() const;
+    u64 idToTokenSize() const;
+    const Token& idToToken(s32 x) const;
+    bool tokenToId(s32& id, const String& token) const;
 
     bool encode(s32& token, const char8_t* str) const;
     bool encode(s32& token, u64 length, const char8_t* str) const;
@@ -1488,13 +1498,6 @@ private:
     gguf::GGUFArray token_types_;
     gguf::GGUFArray merges_;
     gguf::GGUFArray added_tokens_;
-
-    struct Token
-    {
-        String text_;
-        f32 score_;
-        s32 type_;
-    };
 
     s32 bos_token_id_;
     s32 eos_token_id_;
@@ -1532,7 +1535,7 @@ public:
     ~Tokenizer();
     Tokenizer(Tokenizer&& other) noexcept;
     Tokenizer& operator=(Tokenizer&& other);
-    Array<s32> tokenize(const std::string& text);
+    Array<s32> tokenize(const std::u8string& text);
 
 private:
     Tokenizer(const Tokenizer&) = delete;
@@ -1562,16 +1565,25 @@ private:
         float score_;
         u64 size_;
     };
+
+    struct Pair
+    {
+        Symbol::index left_;
+        Symbol::index right_;
+    };
+
     static u64 length(char c);
+    static unicode_byte_to_utf8_map();
+    static s32 byte_to_token(const Vocabulary& vocab, char8_t c);
     void try_add_bigram(Symbol::index left, Symbol::index right);
+    void resegment(Array<s32>& output, const Symbol& symbol) const;
 
     static const char8_t* Pattern;
     char8_t* buffer_;
-    Vocabulary tokens_;
+    Vocabulary vocab_;
     Array<Symbol> symbols_;
     PriorityQueue<Bigram> work_queue_;
-
-    //std::map<std::string, std::pair<int, int>> rev_merge;
+    HashMap<String, Pair> rev_merge_;
 };
 
 //--- Sampler

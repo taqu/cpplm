@@ -15,12 +15,12 @@
 		<Encoding>UTF8</Encoding>
 	</UnifyEncoding>
 	<AI>
-		<ModelGeneral>phi3</ModelGeneral>
-		<ModelGeneration>phi3</ModelGeneration>
-		<ModelTranslation>phi3</ModelTranslation>
+		<ModelGeneral>gemma2</ModelGeneral>
+		<ModelGeneration>gemma2</ModelGeneration>
+		<ModelTranslation>gemma2</ModelTranslation>
 		<ApiKey>XXX</ApiKey>
-		<ApiEndpoint>http://localhost:9090</ApiEndpoint>
-		<CompletionEndpoint>http://localhost:9090</CompletionEndpoint>
+		<ApiEndpoint>http://127.0.0.1:9090</ApiEndpoint>
+		<CompletionEndpoint>http://127.0.0.1:9090</CompletionEndpoint>
 		<FormatResponse>False</FormatResponse>
 		<Temperature>0.1</Temperature>
 		<Timeout>30</Timeout>

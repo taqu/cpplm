@@ -3,6 +3,8 @@
 #include <functional>
 #include <algorithm>
 #include <bit>
+#include <optional>
+#include <unordered_map>
 #include <immintrin.h>
 #include <mimalloc-2.1/mimalloc.h>
 
@@ -131,6 +133,64 @@ namespace cppgpt
 {
 namespace
 {
+    std::optional<s32> unicode_cpt_to_utf8(char8_t output[4], uint32_t cp)
+    {
+        if(/* 0x00 <= cp && */ cp <= 0x7FUL) {
+            output[0] = cp;
+            return std::make_optional<s32>(1);
+        }
+        if(0x80UL <= cp && cp <= 0x7FFUL) {
+            output[0] = 0xC0UL | ((cp >> 6) & 0x1FUL);
+            output[1] = 0x80UL | (cp & 0x3FUL);
+            return std::make_optional<s32>(2);
+        }
+        if(0x800UL <= cp && cp <= 0xFFFFUL) {
+            output[0] = 0xE0UL | ((cp >> 12) & 0x0FUL);
+            output[1] = 0x80UL | ((cp >> 6) & 0x3FUL);
+            output[2] = 0x80UL | (cp & 0x3FUL);
+            return std::make_optional<s32>(3);
+        }
+        if(0x10000 <= cp && cp <= 0x10ffff) {
+            output[0] = 0xF0UL | ((cp >> 18) & 0x07UL);
+            output[1] = 0x80UL | ((cp >> 12) & 0x3FUL);
+            output[2] = 0x80UL | ((cp >> 6) & 0x3FUL);
+            output[3] = 0x80UL | (cp & 0x3FUL);
+            return std::make_optional<s32>(4);
+        }
+        return std::nullopt;
+    }
+
+    std::unordered_map<uint8_t, std::u8string> unicode_byte_to_utf8_map()
+    {
+        std::unordered_map<uint8_t, std::string> map;
+        for(int ch = 0x21; ch <= 0x7E; ++ch) { // u'!' to u'~'
+            assert(0 <= ch && ch < 256);
+            map[ch] = unicode_cpt_to_utf8(ch);
+        }
+        for(int ch = 0xA1; ch <= 0xAC; ++ch) { // u'¡' to u'¬'
+            assert(0 <= ch && ch < 256);
+            map[ch] = unicode_cpt_to_utf8(ch);
+        }
+        for(int ch = 0xAE; ch <= 0xFF; ++ch) { // u'®' to u'ÿ'
+            assert(0 <= ch && ch < 256);
+            map[ch] = unicode_cpt_to_utf8(ch);
+        }
+        auto n = 0;
+        for(int ch = 0; ch < 256; ++ch) {
+            if(map.find(ch) == map.end()) {
+                map[ch] = unicode_cpt_to_utf8(256 + n);
+                ++n;
+            }
+        }
+        return map;
+    }
+
+    std::string unicode_byte_to_utf8(uint8_t byte)
+    {
+    static std::unordered_map<uint8_t, std::string> map = unicode_byte_to_utf8_map();
+    return map.at(byte);
+}
+
     u32 get_bit_size(ggml_type type)
     {
         switch(type) {
@@ -2735,6 +2795,26 @@ s32 Vocabulary::getMaxTokenLength() const
     return max_token_length_;
 }
 
+u64 Vocabulary::idToTokenSize() const
+{
+    return idToToken_.size();
+}
+
+const Vocabulary::Token& Vocabulary::idToToken(s32 x) const
+{
+    return idToToken_[x];
+}
+
+bool Vocabulary::tokenToId(s32& id, const String& token) const
+{
+    u32 pos = tokenToId_.find(token);
+    if(pos != tokenToId_.end()){
+    id = tokenToId_.getValue(pos);
+    return true;
+    }
+    return false;
+}
+
 bool Vocabulary::encode(s32& token, const char8_t* str) const
 {
     assert(nullptr != str);
@@ -2798,9 +2878,9 @@ Tokenizer::Tokenizer()
 
 Tokenizer::Tokenizer(const gguf::GGUF& model_data)
     :buffer_(nullptr)
-    ,tokens_(model_data)
+    ,vocab_(model_data)
 {
-    buffer_ = (char8_t*)allocate((tokens_.getMaxTokenLength() + 1 + 2)*sizeof(char8_t));
+    buffer_ = (char8_t*)allocate((vocab_.getMaxTokenLength() + 1 + 2)*sizeof(char8_t));
 }
 
 Tokenizer::~Tokenizer()
@@ -2810,7 +2890,7 @@ Tokenizer::~Tokenizer()
 }
 
 Tokenizer::Tokenizer(Tokenizer&& other) noexcept
-    :tokens_(std::move(other.tokens_))
+    :vocab_(std::move(other.vocab_))
     ,buffer_(other.buffer_)
 {
     other.buffer_ = nullptr;
@@ -2820,7 +2900,7 @@ Tokenizer& Tokenizer::operator=(Tokenizer&& other)
 {
     if(this != &other){
         deallocate(buffer_);
-        tokens_ = std::move(other.tokens_);
+        vocab_ = std::move(other.vocab_);
         buffer_ = other.buffer_;
 
         other.buffer_ = nullptr;
@@ -2828,11 +2908,12 @@ Tokenizer& Tokenizer::operator=(Tokenizer&& other)
     return *this;
 }
 
-Array<s32> Tokenizer::tokenize(const std::string& text)
+Array<s32> Tokenizer::tokenize(const std::u8string& text)
 {
     Array<s32> result;
     symbols_.clear();
     symbols_.reserve(text.size());
+    rev_merge_.clear();
     // split string into utf8 chars
         s32 index = 0;
         u64 offset = 0;
@@ -2896,35 +2977,87 @@ u64 Tokenizer::length(char c)
     return lookup[static_cast<uint8_t>(c) >> 4];
 }
 
+s32 Tokenizer::byte_to_token(const Vocabulary& vocab, char8_t c)
+{
+    static const char8_t hex[] = u8"0123456789ABCDEF";
+    switch (llama_vocab_get_type(vocab)) {
+        case LLAMA_VOCAB_TYPE_SPM: {
+            const char buf[7] = { '<', '0', 'x', hex[ch >> 4], hex[ch & 15], '>', 0 };
+            auto token = vocab.token_to_id.find(buf);
+            if (token != vocab.token_to_id.end()) {
+                return (*token).second;
+            }
+            // Try to fall back to just the byte as a string
+            const char buf2[2] = { (char)ch, 0 };
+            return vocab.token_to_id.at(buf2);
+        }
+        case LLAMA_VOCAB_TYPE_WPM:
+        case LLAMA_VOCAB_TYPE_BPE: {
+            return vocab.token_to_id.at(unicode_byte_to_utf8(ch));
+        }
+        default:
+            GGML_ASSERT(false);
+    }
+
+}
+
 void Tokenizer::try_add_bigram(Symbol::index left, Symbol::index right)
 {
     if (left == -1 || right == -1) {
             return;
         }
 
-        const std::string text = std::string(reinterpret_cast<const char*>(symbols_[left].text_), symbols_[left].len_ + symbols_[right].len_);
-        auto token = vocab.token_to_id.find(text);
-
-        if (token == vocab.token_to_id.end()) {
+        u64 size = symbols_[left].len_ + symbols_[right].len_;
+        s32 tokenId = 0;
+        if(vocab_.encode(tokenId, size, symbols_[left].text_)){
             return;
         }
-
-        if (static_cast<size_t>((*token).second) >= vocab.id_to_token.size()) {
+        if(vocab_.idToTokenSize()<=static_cast<u64>(tokenId)){
             return;
         }
-
-        const auto & tok_data = vocab.id_to_token[(*token).second];
+        const Vocabulary::Token& token = vocab_.idToToken(tokenId);
 
         Bigram bigram;
-        bigram.left  = left;
-        bigram.right = right;
-        bigram.score = tok_data.score;
-        bigram.size  = text.size();
+        bigram.left_  = left;
+        bigram.right_ = right;
+        bigram.score_ = token.score_;
+        bigram.size_  = size;
 
-        work_queue.push(bigram);
+        work_queue_.push_back(bigram);
 
         // Do we need to support is_unused?
-        rev_merge[text] = std::make_pair(left, right);
+        String str;
+        str.len_ = size;
+        str.str_ = symbols_[left].text_;
+        rev_merge_.add(str, {left, right});
+}
+
+void Tokenizer::resegment(Array<s32>& output, const Symbol& symbol) const
+{
+    String text;
+    text.len_ = symbol.len_;
+    text.str_ = symbol.text_;
+        s32 token = 0;
+        // Do we need to support is_unused?
+        if(vocab_.tokenToId(token_id, text)){
+            output.push_back(token);
+            return;
+        }
+        u32 pos = rev_merge_.find(text);
+        if(pos == rev_merge_.end()){
+            // output any symbols that did not form tokens as bytes.
+            output.reserve(output.size() + symbol.len_);
+            for(u64 i=0; i<symbol.len_; ++i){
+                s32 token_id = llama_byte_to_token(vocab_, symbol.text_[i]);
+                llama_vocab::id token_id = llama_byte_to_token(vocab, symbol.text[j]);
+                output.push_back(token_id);
+            }
+            return;
+        }
+
+        resegment(symbols[p->second.first],  output);
+        resegment(symbols[p->second.second], output);
+
 }
 
 //--- Sampler
