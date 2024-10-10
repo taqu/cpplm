@@ -11,6 +11,7 @@
 #include <utility>
 #include <string>
 #include <functional>
+#include <unordered_map>
 
 // new/delete
 void* operator new(std::size_t size);
@@ -1484,11 +1485,10 @@ public:
     u64 idToTokenSize() const;
     const Token& idToToken(s32 x) const;
     bool tokenToId(s32& id, const String& token) const;
+    bool tokenToId(s32& id, const std::u8string& token) const;
 
     bool encode(s32& token, const char8_t* str) const;
     bool encode(s32& token, u64 length, const char8_t* str) const;
-    bool decode(char8_t str[512], s32 token) const;
-    bool decode(u64 length, char8_t str[], s32 token) const;
 private:
     Vocabulary(const Vocabulary&) = delete;
     Vocabulary& operator=(const Vocabulary&) = delete;
@@ -1573,7 +1573,7 @@ private:
     };
 
     static u64 length(char c);
-    static unicode_byte_to_utf8_map();
+    static std::unordered_map<uint8_t, std::u8string> unicode_byte_to_utf8_map();
     static s32 byte_to_token(const Vocabulary& vocab, char8_t c);
     void try_add_bigram(Symbol::index left, Symbol::index right);
     void resegment(Array<s32>& output, const Symbol& symbol) const;

@@ -1,12 +1,11 @@
 #include "cppgpt.h"
-#include <cmath>
-#include <functional>
 #include <algorithm>
 #include <bit>
-#include <optional>
-#include <unordered_map>
+#include <cmath>
+#include <functional>
 #include <immintrin.h>
 #include <mimalloc-2.1/mimalloc.h>
+#include <optional>
 
 // new/delete
 void* operator new(std::size_t size)
@@ -133,63 +132,77 @@ namespace cppgpt
 {
 namespace
 {
-    std::optional<s32> unicode_cpt_to_utf8(char8_t output[4], uint32_t cp)
+    std::optional<u32> unicode_cpt_to_utf8(char8_t output[4], uint32_t cp)
     {
         if(/* 0x00 <= cp && */ cp <= 0x7FUL) {
-            output[0] = cp;
-            return std::make_optional<s32>(1);
+            output[0] = static_cast<char8_t>(cp);
+            return std::make_optional<u32>(1);
         }
         if(0x80UL <= cp && cp <= 0x7FFUL) {
             output[0] = 0xC0UL | ((cp >> 6) & 0x1FUL);
             output[1] = 0x80UL | (cp & 0x3FUL);
-            return std::make_optional<s32>(2);
+            return std::make_optional<u32>(2);
         }
         if(0x800UL <= cp && cp <= 0xFFFFUL) {
             output[0] = 0xE0UL | ((cp >> 12) & 0x0FUL);
             output[1] = 0x80UL | ((cp >> 6) & 0x3FUL);
             output[2] = 0x80UL | (cp & 0x3FUL);
-            return std::make_optional<s32>(3);
+            return std::make_optional<u32>(3);
         }
         if(0x10000 <= cp && cp <= 0x10ffff) {
             output[0] = 0xF0UL | ((cp >> 18) & 0x07UL);
             output[1] = 0x80UL | ((cp >> 12) & 0x3FUL);
             output[2] = 0x80UL | ((cp >> 6) & 0x3FUL);
             output[3] = 0x80UL | (cp & 0x3FUL);
-            return std::make_optional<s32>(4);
+            return std::make_optional<u32>(4);
         }
         return std::nullopt;
     }
 
-    std::unordered_map<uint8_t, std::u8string> unicode_byte_to_utf8_map()
+    std::unordered_map<char8_t, std::u8string> unicode_byte_to_utf8_map()
     {
-        std::unordered_map<uint8_t, std::string> map;
-        for(int ch = 0x21; ch <= 0x7E; ++ch) { // u'!' to u'~'
-            assert(0 <= ch && ch < 256);
-            map[ch] = unicode_cpt_to_utf8(ch);
+        char8_t output[4];
+        std::unordered_map<char8_t, std::u8string> map;
+        for(uint32_t c = 0x21UL; c <= 0x7EUL; ++c) { // u'!' to u'~'
+            assert(0 <= c && c < 256);
+            std::optional<u32> r = unicode_cpt_to_utf8(output, c);
+            if(r) {
+                std::u8string str = std::u8string(output, r.value());
+                map[static_cast<char8_t>(c)] = std::u8string(output, r.value());
+            }
         }
-        for(int ch = 0xA1; ch <= 0xAC; ++ch) { // u'¡' to u'¬'
-            assert(0 <= ch && ch < 256);
-            map[ch] = unicode_cpt_to_utf8(ch);
+        for(uint32_t c = 0xA1UL; c <= 0xACUL; ++c) { // u'¡' to u'¬'
+            assert(0 <= c && c < 256);
+            std::optional<u32> r = unicode_cpt_to_utf8(output, c);
+            if(r) {
+                map[static_cast<char8_t>(c)] = std::u8string(output, r.value());
+            }
         }
-        for(int ch = 0xAE; ch <= 0xFF; ++ch) { // u'®' to u'ÿ'
-            assert(0 <= ch && ch < 256);
-            map[ch] = unicode_cpt_to_utf8(ch);
+        for(uint32_t c = 0xAEUL; c <= 0xFFUL; ++c) { // u'®' to u'ÿ'
+            assert(0 <= c && c < 256);
+            std::optional<u32> r = unicode_cpt_to_utf8(output, c);
+            if(r) {
+                map[static_cast<char8_t>(c)] = std::u8string(output, r.value());
+            }
         }
-        auto n = 0;
-        for(int ch = 0; ch < 256; ++ch) {
-            if(map.find(ch) == map.end()) {
-                map[ch] = unicode_cpt_to_utf8(256 + n);
-                ++n;
+        uint32_t n = 0;
+        for(uint32_t c = 0; c < 256UL; ++c) {
+            if(map.find(static_cast<char8_t>(c)) == map.end()) {
+                std::optional<u32> r = unicode_cpt_to_utf8(output, 256 + n);
+                if(r) {
+                    map[static_cast<char8_t>(c)] = std::u8string(output, r.value());
+                    ++n;
+                }
             }
         }
         return map;
     }
 
-    std::string unicode_byte_to_utf8(uint8_t byte)
+    const std::u8string& unicode_byte_to_utf8(char8_t byte)
     {
-    static std::unordered_map<uint8_t, std::string> map = unicode_byte_to_utf8_map();
-    return map.at(byte);
-}
+        static std::unordered_map<char8_t, std::u8string> map = unicode_byte_to_utf8_map();
+        return map.at(byte);
+    }
 
     u32 get_bit_size(ggml_type type)
     {
@@ -400,17 +413,17 @@ void deallocate(void* ptr, size_t align)
 namespace
 {
     //--- SplitMix
-//--------------------------------------------
-uint64_t SplitMix_next(uint64_t& state)
-{
-    state += 0x9E3779B97f4A7C15ULL;
-    uint64_t t = state;
-    t = (t ^ (t >> 30)) * 0xBF58476D1CE4E5B9ULL;
-    t = (t ^ (t >> 27)) * 0x94D049BB133111EBULL;
-    return t ^ (t >> 31);
-}
+    //--------------------------------------------
+    uint64_t SplitMix_next(uint64_t& state)
+    {
+        state += 0x9E3779B97f4A7C15ULL;
+        uint64_t t = state;
+        t = (t ^ (t >> 30)) * 0xBF58476D1CE4E5B9ULL;
+        t = (t ^ (t >> 27)) * 0x94D049BB133111EBULL;
+        return t ^ (t >> 31);
+    }
 
-/**
+    /**
      * @brief 32 bit right rotation
      * @param [in] x ... input
      * @param [in] r ... count of rotation
@@ -420,7 +433,7 @@ uint64_t SplitMix_next(uint64_t& state)
     {
         return (x >> r) | (x << ((~r + 1) & 31U));
     }
-}
+} // namespace
 
 //--- Random
 //------------------------------------------------------------
@@ -478,15 +491,15 @@ float Random::frand()
                 break;
             }
         }
-    }else{
+    } else {
         int32_t c = std::countr_zero(b);
         exponent -= c;
     }
-    const uint32_t mantissa = (u>>8)&0x7FFFFFUL;
-    if(0==mantissa && (u>>31)){
+    const uint32_t mantissa = (u >> 8) & 0x7FFFFFUL;
+    if(0 == mantissa && (u >> 31)) {
         ++exponent;
     }
-    return std::bit_cast<float,uint32_t>((exponent<<23)|mantissa);
+    return std::bit_cast<float, uint32_t>((exponent << 23) | mantissa);
 }
 
 //--- wyhash
@@ -1990,7 +2003,7 @@ namespace op
                 } // for(u64 i
 
             } // for(u64 qrow
-        }     // for(u64 h
+        } // for(u64 h
     }
 
     void qkv_attn_matmul(Tensor& qkv, const Tensor& qk, const Tensor& v, u64 n_heads)
@@ -2014,8 +2027,8 @@ namespace op
                     u64 qkv_i = h * d_head + qkrow * d_embed + vcol;
                     qkv.data<f32>()[qkv_i] = dot;
                 } // for(u64 vcol
-            }     // for(u64 qkrow
-        }         // for(u64 h
+            } // for(u64 qkrow
+        } // for(u64 h
     }
 
     void matmul(f32* dst, const f32* x, const f32* w, u64 n, u64 d)
@@ -2340,10 +2353,10 @@ void SelfAttention::forward(
     }
     // multihead attention. iterate over all heads
     {
-        ::memset(input.data<f32>(), 0, n_heads*head_size*sizeof(f32));
+        ::memset(input.data<f32>(), 0, n_heads * head_size * sizeof(f32));
         f32 inv_head_size = 1.0f / ::sqrtf(static_cast<float>(head_size));
         for(u64 h = 0; h < n_heads; ++h) {
-            const f32* tq = q + h * head_size;                               // query vector for this head
+            // const f32* tq = q + h * head_size;                               // query vector for this head
             f32* attn = attention.data<f32>() + h * config.sequence_length_; // attention scores for this head
             // iterate over all timesteps, including the current step
             for(u64 t = 0; t <= position; ++t) {
@@ -2428,7 +2441,7 @@ void FeedForwardSwiGLU::forward(
     const Config& config,
     Tensor& output,
     const Tensor& input,
-        Tensor& buffer0,
+    Tensor& buffer0,
     Tensor& buffer1)
 {
     u64 dim = config.dimension_;
@@ -2449,21 +2462,37 @@ void FeedForwardSwiGLU::forward(
 
 //--- TransformerBlock
 //-----------------------------------------------------------
-    TransformerBlock::TransformerBlock()
-    :duration_(0)
+TransformerBlock::TransformerBlock()
+    : duration_(0)
 {
 }
 
-    TransformerBlock::~TransformerBlock()
+TransformerBlock::~TransformerBlock()
 {
 }
 
-    TransformerBlock::TransformerBlock(TransformerBlock&& other)
+TransformerBlock::TransformerBlock(TransformerBlock&& other)
+    : duration_(0)
+    , attn_rmsnorm_(std::move(other.attn_rmsnorm_))
+    , attn_(std::move(other.attn_))
+    , attn_residual_(std::move(other.attn_residual_))
+    , ff_rmsnorm_(std::move(other.ff_rmsnorm_))
+    , ff_(std::move(other.ff_))
+    , ff_residual_(std::move(other.ff_residual_))
 {
 }
 
 TransformerBlock& TransformerBlock::operator=(TransformerBlock&& other)
 {
+    if(this == &other) {
+        duration_ = 0;
+        attn_rmsnorm_ = std::move(other.attn_rmsnorm_);
+        attn_ = std::move(other.attn_);
+        attn_residual_ = std::move(other.attn_residual_);
+        ff_rmsnorm_ = std::move(other.ff_rmsnorm_);
+        ff_ = std::move(other.ff_);
+        ff_residual_ = std::move(other.ff_residual_);
+    }
     return *this;
 }
 
@@ -2480,7 +2509,7 @@ void TransformerBlock::forward(
     Tensor& buffer0,
     Tensor& buffer1,
     Tensor& hbuffer0,
-        Tensor& hbuffer1)
+    Tensor& hbuffer1)
 {
     attn_rmsnorm_.forward(buffer0, input);
     u64 kv_dim = (config.dimension_ * config.num_kv_heads_) / config.num_heads_;
@@ -2599,7 +2628,7 @@ Vocabulary::Vocabulary(const gguf::GGUF& model_data)
     // Add tokens to maps
     tokenToId_.reserve(static_cast<u32>(tokens_.size_));
     idToToken_.resize(tokens_.size_);
-    ::memset(&idToToken_[0], 0, sizeof(Token)*tokens_.size_);
+    ::memset(&idToToken_[0], 0, sizeof(Token) * tokens_.size_);
     s32 id = 0;
 
     for(GGUFArray::Iterator<GGUFString> itr = tokens_.begin<GGUFString>(); itr; ++itr, ++id) {
@@ -2607,13 +2636,13 @@ Vocabulary::Vocabulary(const gguf::GGUF& model_data)
         String str = {ggufStr.length_, ggufStr.str_};
         max_token_length_ = (std::max)(max_token_length_, static_cast<s32>(ggufStr.length_));
         tokenToId_.add(str, id);
-        if(id<idToToken_.size()){
+        if(id < idToToken_.size()) {
             Token token = {};
             token.text_ = str;
-            if(id<scores_.size_){
+            if(id < scores_.size_) {
                 token.score_ = scores_.get<f32>(id);
             }
-            if(id<token_types_.size_){
+            if(id < token_types_.size_) {
                 token.type_ = token_types_.get<s32>(id);
             }
             idToToken_[id] = token;
@@ -2785,7 +2814,7 @@ s32 Vocabulary::getCls() const
     return cls_token_id_;
 }
 
-s32 Vocabulary:: getMask() const
+s32 Vocabulary::getMask() const
 {
     return mask_token_id_;
 }
@@ -2808,9 +2837,22 @@ const Vocabulary::Token& Vocabulary::idToToken(s32 x) const
 bool Vocabulary::tokenToId(s32& id, const String& token) const
 {
     u32 pos = tokenToId_.find(token);
-    if(pos != tokenToId_.end()){
-    id = tokenToId_.getValue(pos);
-    return true;
+    if(pos != tokenToId_.end()) {
+        id = tokenToId_.getValue(pos);
+        return true;
+    }
+    return false;
+}
+
+bool Vocabulary::tokenToId(s32& id, const std::u8string& token) const
+{
+    String str;
+    str.len_ = token.length();
+    str.str_ = token.c_str();
+    u32 pos = tokenToId_.find(str);
+    if(pos != tokenToId_.end()) {
+        id = tokenToId_.getValue(pos);
+        return true;
     }
     return false;
 }
@@ -2843,44 +2885,19 @@ bool Vocabulary::encode(s32& token, u64 length, const char8_t* str) const
     return false;
 }
 
-bool Vocabulary::decode(char8_t str[512], s32 token) const
-{
-    //if(static_cast<u64>(token)<idToToken_.size()){
-    //    const String& value = idToToken_[static_cast<u32>(token)];
-    //    u64 len = (std::min)(511ULL, value.len_);
-    //    ::memcpy(str, value.str_, len);
-    //    str[len] = u8'\0';
-    //    return true;
-    //}
-    return false;
-}
-
-bool Vocabulary::decode(u64 length, char8_t str[], s32 token) const
-{
-    assert(0 < length);
-    //if(static_cast<u64>(token)<idToToken_.size()){
-    //    const String& value = idToToken_[static_cast<u32>(token)];
-    //    u64 len = (std::min)(length - 1, value.len_);
-    //    ::memcpy(str, value.str_, len);
-    //    str[len] = u8'\0';
-    //    return true;
-    //}
-    return false;
-}
-
 //--- Tokenizer
 //-----------------------------------------------------------
 const char8_t* Tokenizer::Pattern = u8R"('s|'t|'re|'ve|'m|'ll|'d| ?[[:alpha:]]+| ?[[:digit:]]+| ?[^\s[:alpha:][:digit:]]+|\s+(?!\S)|\s+)";
 Tokenizer::Tokenizer()
-    :buffer_(nullptr)
+    : buffer_(nullptr)
 {
 }
 
 Tokenizer::Tokenizer(const gguf::GGUF& model_data)
-    :buffer_(nullptr)
-    ,vocab_(model_data)
+    : buffer_(nullptr)
+    , vocab_(model_data)
 {
-    buffer_ = (char8_t*)allocate((vocab_.getMaxTokenLength() + 1 + 2)*sizeof(char8_t));
+    buffer_ = (char8_t*)allocate((vocab_.getMaxTokenLength() + 1 + 2) * sizeof(char8_t));
 }
 
 Tokenizer::~Tokenizer()
@@ -2890,15 +2907,15 @@ Tokenizer::~Tokenizer()
 }
 
 Tokenizer::Tokenizer(Tokenizer&& other) noexcept
-    :vocab_(std::move(other.vocab_))
-    ,buffer_(other.buffer_)
+    : vocab_(std::move(other.vocab_))
+    , buffer_(other.buffer_)
 {
     other.buffer_ = nullptr;
 }
 
 Tokenizer& Tokenizer::operator=(Tokenizer&& other)
 {
-    if(this != &other){
+    if(this != &other) {
         deallocate(buffer_);
         vocab_ = std::move(other.vocab_);
         buffer_ = other.buffer_;
@@ -2915,60 +2932,60 @@ Array<s32> Tokenizer::tokenize(const std::u8string& text)
     symbols_.reserve(text.size());
     rev_merge_.clear();
     // split string into utf8 chars
-        s32 index = 0;
-        u64 offset = 0;
-        while(offset < text.size()){
-            Symbol symbol;
-            size_t len = length(text[offset]);
-            symbol.text_ = reinterpret_cast<const char8_t*>(text.c_str()) + offset;
-            symbol.len_ = (std::min)(static_cast<u64>(len), text.size() - offset);
-            offset += symbol.len_;
-            symbol.prev_ = index - 1;
-            symbol.next_ = offset == text.size() ? -1 : index + 1;
-            ++index;
-            symbols_.push_back(symbol);
+    s32 index = 0;
+    u64 offset = 0;
+    while(offset < text.size()) {
+        Symbol symbol;
+        size_t len = length(text[offset]);
+        symbol.text_ = reinterpret_cast<const char8_t*>(text.c_str()) + offset;
+        symbol.len_ = (std::min)(static_cast<u64>(len), text.size() - offset);
+        offset += symbol.len_;
+        symbol.prev_ = index - 1;
+        symbol.next_ = offset == text.size() ? -1 : index + 1;
+        ++index;
+        symbols_.push_back(symbol);
+    }
+
+    // seed the work queue with all possible 2-character tokens.
+    for(u64 i = 1; i < symbols_.size(); ++i) {
+        try_add_bigram(static_cast<s32>(i - 1), static_cast<s32>(i));
+    }
+
+    // keep substituting the highest frequency pairs for as long as we can.
+    while(0 < work_queue_.size()) {
+        Bigram bigram = work_queue_.front();
+        work_queue_.pop_front();
+
+        Symbol& left_sym = symbols_[bigram.left_];
+        Symbol& right_sym = symbols_[bigram.right_];
+
+        // if one of the symbols already got merged, skip it.
+        if(left_sym.len_ == 0
+           || right_sym.len_ == 0
+           || (left_sym.len_ + right_sym.len_) != bigram.size_) {
+            continue;
         }
 
-        // seed the work queue with all possible 2-character tokens.
-        for (u64 i = 1; i < symbols_.size(); ++i) {
-            try_add_bigram(i - 1, i);
+        // merge the right sym into the left one
+        left_sym.len_ += right_sym.len_;
+        right_sym.len_ = 0;
+
+        // remove the right sym from the chain
+        left_sym.next_ = right_sym.next_;
+        if(0 <= right_sym.next_) {
+            symbols_[right_sym.next_].prev_ = bigram.left_;
         }
 
-        // keep substituting the highest frequency pairs for as long as we can.
-        while (0<work_queue_.size()) {
-            Bigram bigram = work_queue_.front();
-            work_queue_.pop_front();
+        // find more substitutions
+        try_add_bigram(left_sym.prev_, bigram.left_);
+        try_add_bigram(bigram.left_, left_sym.next_);
+    }
 
-            Symbol& left_sym = symbols_[bigram.left_];
-            Symbol& right_sym = symbols_[bigram.right_];
-
-            // if one of the symbols already got merged, skip it.
-            if (left_sym.len_ == 0
-                || right_sym.len_ == 0
-                || (left_sym.len_ + right_sym.len_) != bigram.size_) {
-                continue;
-            }
-
-            // merge the right sym into the left one
-            left_sym.len_ += right_sym.len_;
-            right_sym.len_ = 0;
-
-            // remove the right sym from the chain
-            left_sym.next_ = right_sym.next_;
-            if (0<=right_sym.next_) {
-                symbols_[right_sym.next_].prev_ = bigram.left_;
-            }
-
-            // find more substitutions
-            try_add_bigram(left_sym.prev_, bigram.left_);
-            try_add_bigram(bigram.left_, left_sym.next_);
-        }
-
-        for (s32 i = 0; i != -1; i = symbols_[i].next_) {
-            Symbol& symbol = symbols_[i];
-            resegment(symbol, output);
-        }
-        return result;
+    for(s32 i = 0; i != -1; i = symbols_[i].next_) {
+        Symbol& symbol = symbols_[i];
+        resegment(result, symbol);
+    }
+    return result;
 }
 
 u64 Tokenizer::length(char c)
@@ -2979,57 +2996,43 @@ u64 Tokenizer::length(char c)
 
 s32 Tokenizer::byte_to_token(const Vocabulary& vocab, char8_t c)
 {
-    static const char8_t hex[] = u8"0123456789ABCDEF";
-    switch (llama_vocab_get_type(vocab)) {
-        case LLAMA_VOCAB_TYPE_SPM: {
-            const char buf[7] = { '<', '0', 'x', hex[ch >> 4], hex[ch & 15], '>', 0 };
-            auto token = vocab.token_to_id.find(buf);
-            if (token != vocab.token_to_id.end()) {
-                return (*token).second;
-            }
-            // Try to fall back to just the byte as a string
-            const char buf2[2] = { (char)ch, 0 };
-            return vocab.token_to_id.at(buf2);
-        }
-        case LLAMA_VOCAB_TYPE_WPM:
-        case LLAMA_VOCAB_TYPE_BPE: {
-            return vocab.token_to_id.at(unicode_byte_to_utf8(ch));
-        }
-        default:
-            GGML_ASSERT(false);
+    s32 token_id = 0;
+    const std::u8string& str = unicode_byte_to_utf8(c);
+    if(vocab.tokenToId(token_id, str)) {
+        return token_id;
     }
-
+    return vocab.getUnknown();
 }
 
 void Tokenizer::try_add_bigram(Symbol::index left, Symbol::index right)
 {
-    if (left == -1 || right == -1) {
-            return;
-        }
+    if(left == -1 || right == -1) {
+        return;
+    }
 
-        u64 size = symbols_[left].len_ + symbols_[right].len_;
-        s32 tokenId = 0;
-        if(vocab_.encode(tokenId, size, symbols_[left].text_)){
-            return;
-        }
-        if(vocab_.idToTokenSize()<=static_cast<u64>(tokenId)){
-            return;
-        }
-        const Vocabulary::Token& token = vocab_.idToToken(tokenId);
+    u64 size = symbols_[left].len_ + symbols_[right].len_;
+    s32 tokenId = 0;
+    if(vocab_.encode(tokenId, size, symbols_[left].text_)) {
+        return;
+    }
+    if(vocab_.idToTokenSize() <= static_cast<u64>(tokenId)) {
+        return;
+    }
+    const Vocabulary::Token& token = vocab_.idToToken(tokenId);
 
-        Bigram bigram;
-        bigram.left_  = left;
-        bigram.right_ = right;
-        bigram.score_ = token.score_;
-        bigram.size_  = size;
+    Bigram bigram;
+    bigram.left_ = left;
+    bigram.right_ = right;
+    bigram.score_ = token.score_;
+    bigram.size_ = size;
 
-        work_queue_.push_back(bigram);
+    work_queue_.push_back(bigram);
 
-        // Do we need to support is_unused?
-        String str;
-        str.len_ = size;
-        str.str_ = symbols_[left].text_;
-        rev_merge_.add(str, {left, right});
+    // Do we need to support is_unused?
+    String str;
+    str.len_ = size;
+    str.str_ = symbols_[left].text_;
+    rev_merge_.add(str, {left, right});
 }
 
 void Tokenizer::resegment(Array<s32>& output, const Symbol& symbol) const
@@ -3037,27 +3040,26 @@ void Tokenizer::resegment(Array<s32>& output, const Symbol& symbol) const
     String text;
     text.len_ = symbol.len_;
     text.str_ = symbol.text_;
-        s32 token = 0;
-        // Do we need to support is_unused?
-        if(vocab_.tokenToId(token_id, text)){
-            output.push_back(token);
-            return;
+    s32 token_id = 0;
+    // Do we need to support is_unused?
+    if(vocab_.tokenToId(token_id, text)) {
+        output.push_back(token_id);
+        return;
+    }
+    u32 pos = rev_merge_.find(text);
+    if(pos == rev_merge_.end()) {
+        // output any symbols that did not form tokens as bytes.
+        output.reserve(output.size() + symbol.len_);
+        for(u64 i = 0; i < symbol.len_; ++i) {
+            s32 t_token_id = byte_to_token(vocab_, symbol.text_[i]);
+            output.push_back(t_token_id);
         }
-        u32 pos = rev_merge_.find(text);
-        if(pos == rev_merge_.end()){
-            // output any symbols that did not form tokens as bytes.
-            output.reserve(output.size() + symbol.len_);
-            for(u64 i=0; i<symbol.len_; ++i){
-                s32 token_id = llama_byte_to_token(vocab_, symbol.text_[i]);
-                llama_vocab::id token_id = llama_byte_to_token(vocab, symbol.text[j]);
-                output.push_back(token_id);
-            }
-            return;
-        }
+        return;
+    }
+    Pair r = rev_merge_.getValue(pos);
 
-        resegment(symbols[p->second.first],  output);
-        resegment(symbols[p->second.second], output);
-
+    resegment(output, symbols_[r.left_]);
+    resegment(output, symbols_[r.right_]);
 }
 
 //--- Sampler
@@ -3066,37 +3068,59 @@ Sampler::Sampler()
     : vocab_size_(0)
     , temperature_(1.0f)
     , topp_(0.9f)
+    , probindex_(nullptr)
 {
 }
 
 Sampler::~Sampler()
 {
+    deallocate(probindex_);
+    probindex_ = nullptr;
 }
 
 Sampler::Sampler(Sampler&& other)
+    :vocab_size_(other.vocab_size_)
+    , temperature_(other.temperature_)
+    , topp_(other.topp_)
+    , random_(other.random_)
+    , probindex_(other.probindex_)
 {
+    other.vocab_size_ = 0;
+    other.probindex_ = nullptr;
 }
 
 Sampler& Sampler::operator=(Sampler&& other)
 {
+    if(this != &other) {
+        deallocate(probindex_);
+
+        vocab_size_ = other.vocab_size_;
+        temperature_ = other.temperature_;
+        topp_ = other.topp_;
+        random_ = other.random_;
+        probindex_ = other.probindex_;
+
+        other.vocab_size_ = 0;
+        other.probindex_ = nullptr;
+    }
     return *this;
 }
 
 u32 Sampler::sample(f32* logits)
 {
     assert(nullptr != logits);
-    if(temperature_<=std::numeric_limits<f32>::epsilon()){
+    if(temperature_ <= std::numeric_limits<f32>::epsilon()) {
         return sample_argmax(vocab_size_, logits);
     }
-    f32 inv_temperature = 1.0f/temperature_;
-    for(u32 i=0; i<vocab_size_; ++i){
+    f32 inv_temperature = 1.0f / temperature_;
+    for(u32 i = 0; i < vocab_size_; ++i) {
         logits[i] *= inv_temperature;
     }
     op::softmax(vocab_size_, logits);
     f32 coin = random_.frand();
-    if(topp_<=0.0f || 1.0f<=topp_){
+    if(topp_ <= 0.0f || 1.0f <= topp_) {
         return sample_mult(vocab_size_, coin, logits);
-    }else{
+    } else {
         return sample_topp(vocab_size_, topp_, coin, probindex_, logits);
     }
 }
@@ -3118,21 +3142,21 @@ u32 Sampler::sample_argmax(u32 size, const f32* probabilities)
 u32 Sampler::sample_mult(u32 size, f32 coin, const f32* probabilities)
 {
     f32 cdf = 0.0f;
-    for(u32 i=0; i<size; ++i){
+    for(u32 i = 0; i < size; ++i) {
         cdf += probabilities[i];
-        if(coin < cdf){
+        if(coin < cdf) {
             return i;
         }
     }
-    return size-1;
+    return size - 1;
 }
 
 u32 Sampler::sample_topp(u32 size, f32 topp, f32 coin, ProbIndex* probindex, const f32* probabilities)
 {
     u32 n0 = 0;
-    const f32 cutoff = (1.0f-topp)/(size-1);
-    for(u32 i=0; i<size; ++i){
-        if(cutoff<=probabilities[i]){
+    const f32 cutoff = (1.0f - topp) / (size - 1);
+    for(u32 i = 0; i < size; ++i) {
+        if(cutoff <= probabilities[i]) {
             probindex[n0].index_ = i;
             probindex[n0].prob_ = probabilities[i];
             ++n0;
@@ -3143,22 +3167,22 @@ u32 Sampler::sample_topp(u32 size, f32 topp, f32 coin, ProbIndex* probindex, con
     });
     f32 cumulative_prob = 0.0f;
     u32 end = n0;
-    for(u32 i=0; i<n0; ++i){
+    for(u32 i = 0; i < n0; ++i) {
         cumulative_prob += probindex[i].prob_;
-        if(topp<cumulative_prob){
-            end = i+1;
+        if(topp < cumulative_prob) {
+            end = i + 1;
             break;
         }
     }
     f32 r = coin * cumulative_prob;
     f32 cdf = 0.0f;
-    for(u32 i=0; i<end; ++i){
+    for(u32 i = 0; i < end; ++i) {
         cdf += probindex[i].prob_;
-        if(r<cdf){
+        if(r < cdf) {
             return probindex[i].index_;
         }
     }
-    return probindex[end-1].index_;
+    return probindex[end - 1].index_;
 }
 
 //--- Llama2
@@ -3188,30 +3212,7 @@ Llama2& Llama2::operator=(Llama2&& other)
     return *this;
 }
 
-void Llama2::forward(u32 token, u32 position)
+void Llama2::forward(u32 , u32 )
 {
-    for(u64 i = 0; i < config_.num_layers_; ++i) {
-        blocks_[i].forward(
-            config_,
-            i,
-            position,
-            context_.x_,
-            context_.x_,
-            context_.query_,
-            context_.key_cache_,
-            context_.value_cache_,
-            context_.attn_,
-            context_.xb_,
-            context_.xb2_,
-            context_.hb_,
-            context_.hb2_);
-    }
-    output_rmsnorm_.forward(context_.x_, context_.x_);
-    op::matmul(
-        context_.logits_.data<f32>(),
-        context_.x_.data<f32>(),
-        output_weight_.data<f32>(),
-        config_.dimension_,
-        config_.vocab_size_);
 }
 } // namespace cppgpt
